@@ -12,36 +12,26 @@
 namespace Symfony\Component\Cache\Adapter;
 
 use Psr\Cache\CacheItemInterface;
+use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\CacheItem;
-use Symfony\Component\Cache\PruneableInterface;
-use Symfony\Component\Cache\ResettableInterface;
-use Symfony\Component\Cache\Traits\ContractsTrait;
-use Symfony\Component\Cache\Traits\ProxyTrait;
-use Symfony\Contracts\Cache\TagAwareCacheInterface;
 
 /**
- * This Adapter is designed as a safe cache storage with tag-based invalidation.
- * The safety means the ability to invalidate any items by the known tags they were saved with.
- * In other words, storage is safe from orphan and stale items due to inconsistency in a tag-item relations
- * which may arise when using LRU or other ephemeral caches.
+ * Base implementation of AbstractEphemeralTagAwareAdapter::class.
  *
- * If a previous tag version has been evicted or expired (or new one cannot be created),
- * Adapter rejects all items with that tag version (or rejects save operation).
+ * Allows to leverage any PSR-6 compatible adapter for accessing cache storage and tagging items.
+ * Defines an opinionated formats and algorithms for generating tag versions and packing item's value,
+ * tag versions and item's metadata into a single value to be stored.
  *
- * This ability does not affected by peak loads and out-of-memory state.
+ * Provides Optimistic Concurrency by allowing deferred computation of the item's value
+ * which starts only after obtaining attached tags' versions.
  *
+ * @link https://en.wikipedia.org/wiki/Optimistic_concurrency_control
+ * @link https://en.wikipedia.org/wiki/Load-link/store-conditional
  *
  * @author Sergey Belyshkin <sbelyshkin@gmail.com>
  */
 class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
 {
-    use ContractsTrait;
-    use ProxyTrait;
-
-    /**
-     * @var string
-     */
-    protected $tagIdPrefix = '';
     /**
      * @var string
      */
@@ -53,72 +43,57 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     /**
      * @var \Closure
      */
-    private $createCacheItem;
-    /**
-     * @var \Closure
-     */
-    private $extractTags;
-    /**
-     * @var \Closure
-     */
-    private $computeValues;
+    private $computeAndPackItems;
 
     /**
      *
-     * @param AdapterInterface $itemPool
-     * @param AdapterInterface|null $tagPool
+     * @param CacheItemPoolInterface $itemPool
+     * @param CacheItemPoolInterface|null $tagPool
      */
-    public function __construct(AdapterInterface $itemPool, AdapterInterface $tagPool = null)
+    public function __construct(CacheItemPoolInterface $itemPool, CacheItemPoolInterface $tagPool = null)
     {
         parent::__construct($itemPool, $tagPool);
         $this->setCallbackWrapper(null);
-        $this->instanceId = \pack('L', \crc32(\getmypid() . '@' . \gethostname()));
+        $this->instanceId = \pack('N', \crc32(\getmypid() . '@' . \gethostname()));
 
-        $this->extractTags = \Closure::bind(
-            static function ($deferred) {
-                $uniqueTags = [];
-                foreach ($deferred as $item) {
-                    $uniqueTags += $item->newMetadata[CacheItem::METADATA_TAGS] ?? [];
-                }
-
-                return $uniqueTags;
-            },
-            null,
-            CacheItem::class
-        );
-
-        $this->computeValues = \Closure::bind(
+        $this->computeAndPackItems = \Closure::bind(
             static function ($deferred, $tagVersions) {
                 $valuesByKey = [];
                 foreach ($deferred as $key => $item) {
                     $startTime = \microtime(true);
                     $key = (string) $key;
-                    // Compute the value in case it's passed as a callback function
-                    if ($item->value instanceof \Closure) {
-                        $item->value = ($item->value)();
-                    }
-                    // Store Value and Tags on the cache value
+                    $itemTagVersions = [];
                     $metadata = $item->newMetadata;
                     if (isset($metadata[CacheItem::METADATA_TAGS])) {
-                        $itemTagVersions = [];
                         foreach ($metadata[CacheItem::METADATA_TAGS] as $tag) {
                             if (!isset($tagVersions[$tag])) {
+                                // Don't compute the value
+                                if ($item->value instanceof \Closure) {
+                                    $item->value = null;
+                                }
                                 // Don't save items without full set of valid tags
                                 continue 2;
                             }
                             $itemTagVersions[$tag] = $tagVersions[$tag];
                         }
-                        $value = ['v' => $item->value, 't' => $itemTagVersions];
                         unset($metadata[CacheItem::METADATA_TAGS]);
-                    } else {
-                        $value = ['v' => $item->value, 't' => []];
                     }
-
+                    // Compute the value in case it's passed as a callback function
+                    if ($item->value instanceof \Closure) {
+                        $item->value = ($item->value)();
+                    }
+                    // Pack the value, tags and meta data.
+                    $value = ['v' => $item->value, 't' => $itemTagVersions];
                     if ($metadata) {
                         // Update item's creation time to represent real computation time
-                        $item->newMetadata[CacheItem::METADATA_CTIME] += (int) \ceil(1000 * (\microtime(true) - $startTime));
-                        // For compactness, expiry and creation duration are packed, using magic numbers as separators
-                        $value['m'] = \pack('VN', (int) (0.1 + $metadata[CacheItem::METADATA_EXPIRY] - CacheItem::METADATA_EXPIRY_OFFSET), $item->newMetadata[CacheItem::METADATA_CTIME]);
+                        $ctime = $item->newMetadata[CacheItem::METADATA_CTIME] += (int) \ceil(1000 * (\microtime(true) - $startTime));
+                        // 1. 03:14:08 UTC on Tuesday, 19 January 2038 timestamp will reach 0x7FFFFFFF and 32-bit systems
+                        // will go back to Unix Epoch, but on 64-bit systems it's OK to use first 32 bits of timestamp
+                        // till 06:28:15 UTC on Sunday, 7 February 2106, when it'll reach 0xFFFFFFFF.
+                        // 2. CTIME is packed as an 8/16/24/32-bits integer. For reference, 24 bits are able to reflect
+                        // intervals up to 4 hours 39 minutes 37 seconds and 215 ms, but in most cases 8 bits are enough.
+                        $length = 4 + ($ctime <= 255 ? 1 : ($ctime <= 65535 ? 2 : ($ctime <= 16777215 ? 3 : 4)));
+                        $value['m'] = \substr(\pack('NV', (int) \ceil($metadata[CacheItem::METADATA_EXPIRY]), $ctime), 0, $length);
                     }
 
                     $packedItem = new CacheItem();
@@ -135,46 +110,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
             CacheItem::class
         );
 
-        $this->createCacheItem = \Closure::bind(
-            static function ($key, $value, $isHit) {
-                $item = new CacheItem();
-                $item->key = $key;
-                $item->isTaggable = true;
-                // The exact structure of the value should be examined before calling this function
-                if (!\is_array($value)) {
-                    return $item;
-                }
-                $item->isHit = $isHit;
-                // Extract value, tags and meta data from the cache value
-                $item->value = $value['v'];
-                $tags = \array_keys($value['t']);
-                $item->metadata[CacheItem::METADATA_TAGS] = \array_combine($tags, $tags);
-                if (isset($value['m'])) {
-                    // For compactness these values are packed, & expiry is offset to reduce size
-                    $v = \unpack('Ve/Nc', $value['m']);
-                    $item->metadata[CacheItem::METADATA_EXPIRY] = $v['e'] + CacheItem::METADATA_EXPIRY_OFFSET;
-                    $item->metadata[CacheItem::METADATA_CTIME] = $v['c'];
-                    if ($item->metadata[CacheItem::METADATA_EXPIRY] < \microtime(true)) {
-                        $item->value = null;
-                        $item->isHit = false;
-                    }
-                }
-
-                return $item;
-            },
-            null,
-            CacheItem::class
-        );
-    }
-
-    protected function isStructureValid($value): bool
-    {
-        return \is_array($value) && \count($value) <= 3 && isset($value['v'], $value['t']) && \is_array($value['t']);
-    }
-
-    protected function containsInvalidTags($value, array $tagVersions): bool
-    {
-        return !empty($value['t']) && $value['t'] != \array_intersect_key($tagVersions, $value['t']);
     }
 
     /**
@@ -186,6 +121,17 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
         $this->clearLastRetrievedTagVersions();
 
         return parent::getItems($keys);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function commit(): bool
+    {
+        $result = parent::commit();
+        $this->clearLastRetrievedTagVersions();
+
+        return $result;
     }
 
     /**
@@ -205,17 +151,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     {
         self::clearLastRetrievedTagVersions();
 
-        return parent::deleteItems($tags);
-    }
-
-    public function __sleep()
-    {
-        throw new \BadMethodCallException('Cannot serialize '.__CLASS__);
-    }
-
-    public function __wakeup()
-    {
-        throw new \BadMethodCallException('Cannot unserialize '.__CLASS__);
+        return parent::invalidateTags($tags);
     }
 
     /**
@@ -226,25 +162,57 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
         $this->commit();
     }
 
-    protected function createCacheItem(string $key, ?array $value, bool $isHit): CacheItem
+    /**
+     * Checks if the structure of the given value meets the format used for packed values.
+     *
+     * @param $value
+     * @return bool
+     */
+    protected function isPackedValueStructureValid($value): bool
     {
-        return ($this->createCacheItem)($key, $value, $isHit);
+        return \is_array($value) && \count($value) <= 3 && isset($value['v'], $value['t']) && \is_array($value['t']);
     }
 
-
-    protected function extractTagsFromItems(iterable $items): array
+    /**
+     * {@inheritdoc}
+     */
+    protected function packItems(iterable $items, array $tagVersions): array
     {
-        return ($this->extractTags)($items);
+        return ($this->computeAndPackItems)($items, $tagVersions);
     }
 
-    protected function extractTagVersionsFromValue($value): array
+    /**
+     * {@inheritdoc}
+     *
+     * @return array{value: mixed, tagVersions: array, meta: array}
+     */
+    protected function unpackItem(CacheItemInterface $item): array
     {
-        return $value['t'];
-    }
+        $value = $item->get();
 
-    protected function computeValues(iterable $items, array $tagVersions): array
-    {
-        return ($this->computeValues)($items, $tagVersions);
+        if (!$this->isPackedValueStructureValid($value)) {
+            return [];
+        }
+
+        $unpacked = [
+            'value' => $value['v'],
+            'tagVersions' => $value['t'],
+            'meta' => [],
+        ];
+
+        if (isset($value['m']) && \is_string($value['m'])) {
+            $v = \unpack('Ne/Vc', str_pad($value['m'], 8, "\x00"));
+            $metadata[CacheItem::METADATA_EXPIRY] = $v['e'];
+            $metadata[CacheItem::METADATA_CTIME] = $v['c'];
+            $unpacked['meta'] = $metadata;
+        }
+
+        if ($value['t']) {
+            $tags = array_keys($value['t']);
+            $unpacked['meta'][CacheItem::METADATA_TAGS] = \array_combine($tags, $tags);
+        }
+
+        return $unpacked;
     }
 
     /**
@@ -275,9 +243,8 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
         }
 
         if ($this->lastRetrievedTagVersions) {
-            if (($tagVersions = array_intersect_key($this->lastRetrievedTagVersions, array_flip($tags))) && count($tagVersions) === count($tags)) {
-                // Allow to use recent tags' versions only for the very next operation to ensure their freshness
-                $this->lastRetrievedTagVersions = [];
+            $tagVersions = \array_intersect_key($this->lastRetrievedTagVersions, \array_flip($tags));
+            if (\count($tagVersions) === \count($tags)) {
                 // All requested tags are in the last retrieved set
                 return $tagVersions;
             }
@@ -289,65 +256,14 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     }
 
     /**
-     * Loads tags from or creates new ones in a tag storage.
-     *
-     * May return only a part of requested tags or even none of them in case of technical issues.
-     *
-     * @param array $tags
-     *
-     * @throws \Psr\Cache\InvalidArgumentException
-     *
-     * @return string[]
-     */
-    protected function retrieveTagVersions(array $tags): array
-    {
-        $tagIds = $this->getTagIdsMap($tags);
-        \ksort($tagIds);
-
-        $tagVersions = $generated = [];
-        foreach ($this->tagPool->getItems(\array_keys($tagIds)) as $tagId => $version) {
-            if ($version->isHit() && $tagVersion = $version->get()) {
-                $tagVersions[$tagIds[$tagId]] = $tagVersion;
-                continue;
-            }
-            $tagVersion = $this->generateTagVersion();
-            $version->set($tagVersion);
-            $this->tagPool->saveDeferred($version);
-            $generated[$tagIds[$tagId]] = $tagVersion;
-        }
-
-        if (!$generated || $this->tagPool->commit()) {
-            return $tagVersions + $generated;
-        }
-
-        return $tagVersions;
-    }
-
-    /**
-     * Returns tag cache IDs to tag keys map.
-     *
-     * @param array $tags   Tag keys
-     *
-     * @return array        Tag IDs to tag keys map
-     */
-    protected function getTagIdsMap(array $tags): array
-    {
-        $tagIds = [];
-        foreach ($tags as $tag) {
-            $tagIds[$this->tagIdPrefix . $tag] = $tag;
-        }
-
-        return $tagIds;
-    }
-
-    /**
      * Generates unique string for robust tag versioning
      *
      * @return string
      */
     protected function generateTagVersion(): string
     {
-        return \pack('L', \mt_rand()) . $this->instanceId;
+        // Add an instance ID to preclude the possibility of ABA problem
+        return \pack('N', \mt_rand()) . $this->instanceId;
     }
 
 }

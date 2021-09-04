@@ -12,34 +12,47 @@
 namespace Symfony\Component\Cache\Adapter;
 
 use Psr\Cache\CacheItemInterface;
+use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\CacheItem;
 use Symfony\Component\Cache\PruneableInterface;
 use Symfony\Component\Cache\ResettableInterface;
 use Symfony\Component\Cache\Traits\ContractsTrait;
-use Symfony\Component\Cache\Traits\ProxyTrait;
+use Symfony\Contracts\Cache\ItemInterface;
 use Symfony\Contracts\Cache\TagAwareCacheInterface;
 
 /**
- * This Adapter is designed as a safe cache storage with tag-based invalidation.
- * The safety means the ability to invalidate any items by the known tags they were saved with.
- * In other words, storage is safe from orphan and stale items due to inconsistency in a tag-item relations
- * which may arise when using LRU or other ephemeral caches.
+ * Abstract class for EphemeralTagAware adapters family.
  *
- * If a previous tag version has been evicted or expired (or new one cannot be created),
- * Adapter rejects all items with that tag version (or rejects save operation).
+ * This family of adapters is intended to provide guaranteed tag-base invalidation for volatile cache storages
+ * as well as for those which provide persistence.
  *
- * This ability does not affected by peak loads and out-of-memory state.
+ * Tags are a separate variables stored in a cache, their values are tag versions which are changed
+ * after every invalidation. Tag versions are an integral part of item's value, so tagging an item
+ * (setting or changing related set of tags) is only possible as a part of storing that item.
+ * If requested tags' versions cannot be obtained for any reason, Adapter rejects storing the item.
+ * The value of an item is valid until tag versions it was saved with (any of them) are changed.
  *
+ * Although invalidation can be fulfilled in various ways, simple deletion of a tag variable is preferred.
+ * Deletion is atomic operation and, in comparison to incrementing or setting a new value, is safe in situations
+ * when the storage is out of space. This gives an additional guarantee of not getting an invalidated items from cache.
  *
  * @author Sergey Belyshkin <sbelyshkin@gmail.com>
  */
 abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterface, TagAwareCacheInterface, PruneableInterface, ResettableInterface
 {
-    public const TAGS_PREFIX = "\0tags\0";
+    //public const ITEM_PREFIX = '$'; // like in PHP
+    public const TAGS_PREFIX = "\0tags\0"; // '#' // just like in our daily lives :)
 
     use ContractsTrait;
-    use ProxyTrait;
 
+    /**
+     * @var CacheItemPoolInterface
+     */
+    private $pool;
+    /**
+     * @var CacheItemPoolInterface
+     */
+    private $tagPool;
     /**
      * @var string
      */
@@ -49,19 +62,20 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     private $deferred = [];
     /**
-     * @var AdapterInterface
+     * @var \Closure
      */
-    private $tagPool;
     private $createCacheItem;
-    private $extractTags;
-    private $computeValues;
+    /**
+     * @var \Closure
+     */
+    private $extractTagsFromItems;
 
     /**
      *
-     * @param AdapterInterface $itemPool
-     * @param AdapterInterface|null $tagPool
+     * @param CacheItemPoolInterface $itemPool
+     * @param CacheItemPoolInterface|null $tagPool
      */
-    public function __construct(AdapterInterface $itemPool, AdapterInterface $tagPool = null)
+    public function __construct(CacheItemPoolInterface $itemPool, CacheItemPoolInterface $tagPool = null)
     {
         $this->pool = $itemPool;
         $this->tagPool = $tagPool;
@@ -69,6 +83,54 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             $this->tagPool = $itemPool;
             $this->tagIdPrefix = static::TAGS_PREFIX;
         }
+
+        $this->createCacheItem = \Closure::bind(
+            static function ($key, $isHit, $value, $meta) {
+                $item = new CacheItem();
+                $item->key = $key;
+                $item->isTaggable = true;
+                $item->isHit = $isHit;
+                $item->value = $value;
+                $item->metadata = $meta;
+
+                return $item;
+            },
+            null,
+            CacheItem::class
+        );
+
+        $this->extractTagsFromItems = \Closure::bind(
+            static function ($deferred) {
+                $uniqueTags = [];
+                foreach ($deferred as $item) {
+                    $uniqueTags += $item->newMetadata[CacheItem::METADATA_TAGS] ?? [];
+                }
+
+                return $uniqueTags;
+            },
+            null,
+            CacheItem::class
+        );
+
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function prune()
+    {
+        $this->pool instanceof PruneableInterface && $this->pool->prune();
+        $this->tagPool instanceof PruneableInterface && $this->tagPool->prune();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function reset()
+    {
+        $this->commit();
+        $this->pool instanceof ResettableInterface && $this->pool->reset();
+        $this->tagPool instanceof ResettableInterface && $this->tagPool->reset();
     }
 
     /**
@@ -97,7 +159,65 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         foreach ($this->getItems([$key]) as $item) {
             return $item;
         }
+
+        return $this->createCacheItem($key);
     }
+
+//    /**
+//     * {@inheritdoc}
+//     */
+//    public function getItems(array $keys = [])
+//    {
+//        if (!$keys) {
+//            return [];
+//        }
+//
+//        if ($this->deferred && \array_intersect_key($this->deferred, array_flip($keys))) {
+//            $this->commit();
+//        }
+//
+//        $invalidItemKeys = $items = $tags = [];
+//        foreach ($this->pool->getItems($keys) as $key => $item) {
+//            if (!$item->isHit()) {
+//                $items[$key] = $this->createCacheItem($key, null, false);
+//                continue;
+//            }
+//            $value = $item->get();
+//            // If the structure does not match what we expect, return an empty item and remove the value from pool
+//            if (!$this->isValueStructureValid($value)) {
+//                $items[$key] = $this->createCacheItem($key, null, false);
+//                $invalidItemKeys[] = $key;
+//                continue;
+//            }
+//            $tags += $this->extractTagVersionsFromValue($value);
+//            $items[$key] = $value;
+//        }
+//
+//        // Try to benefit from bulk operations, if supported by tags pool
+//        $tagVersions = $this->getTagVersions(\array_keys($tags));
+//
+//        foreach ($items as $key => $value) {
+//            if ($value instanceof CacheItem) {
+//                continue;
+//            }
+//
+//            if ($this->containsInvalidTags($value, $tagVersions)) {
+//                $items[$key] = $this->createCacheItem($key, null, false);
+//                $invalidItemKeys[] = $key;
+//                continue;
+//            }
+//
+//            $items[$key] = $this->createCacheItem($key, $value, true);
+//            // The item may be invalid due to its expiration and time discrepancy
+//            // but we won't delete it and let the cache collect the garbage itself
+//        }
+//
+//        if ($invalidItemKeys) {
+//            $this->pool->deleteItems($invalidItemKeys);
+//        }
+//
+//        return $items;
+//    }
 
     /**
      * {@inheritdoc}
@@ -107,63 +227,114 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         if (!$keys) {
             return [];
         }
-        if ($this->deferred) {
+
+        if ($this->deferred && \array_intersect_key($this->deferred, \array_flip($keys))) {
             $this->commit();
         }
-        $invalidItemKeys = $items = $tags = [];
+
+        $expiredItemKeys = $invalidItemKeys = $items = $tags = [];
         foreach ($this->pool->getItems($keys) as $key => $item) {
             if (!$item->isHit()) {
-                $items[$key] = $this->createCacheItem($key, null, false);
+                $items[$key] = null;
                 continue;
             }
-            $value = $item->get();
-            // If the structure does not match what we expect, return an empty item and remove the value from pool
-            if (!$this->isStructureValid($value)) {
-                $items[$key] = $this->createCacheItem($key, null, false);
+
+            $itemData = $this->unpackItem($item);
+
+            if (!$itemData) {
                 $invalidItemKeys[] = $key;
+                $items[$key] = null;
                 continue;
             }
-            $tags += $this->extractTagVersionsFromValue($value);
-            $items[$key] = $value;
+
+            // Even if cache tracks item's TTL, the item may be expired because of time discrepancy
+            if (isset($itemData['meta'][CacheItem::METADATA_EXPIRY]) && $itemData['meta'][CacheItem::METADATA_EXPIRY] < \microtime(true)) {
+                $expiredItemKeys[] = $key;
+                $items[$key] = null;
+                continue;
+            }
+
+            $tags += $itemData['tagVersions'];
+            $items[$key] = $itemData;
         }
 
-        // Try to benefit from bulk operations, if supported by tags pool
+        $this->evictExpiredItems($expiredItemKeys);
+
         $tagVersions = $this->getTagVersions(\array_keys($tags));
 
-        foreach ($items as $key => $value) {
-            if ($value instanceof CacheItem) {
+        foreach ($items as $key => $itemData) {
+            if (null === $itemData) {
+                $items[$key] = $this->createCacheItem($key);
                 continue;
             }
 
-            if ($this->containsInvalidTags($value, $tagVersions)) {
-                $items[$key] = $this->createCacheItem($key, null, false);
+            if (!$this->isTagVersionsValid($itemData['tagVersions'], $tagVersions)) {
                 $invalidItemKeys[] = $key;
+                $items[$key] = $this->createCacheItem($key);
                 continue;
             }
 
-            $items[$key] = $this->createCacheItem($key, $value, true);
-            // The item may be invalid due to its expiration and time discrepancy
-            // but we won't delete it and let the cache collect the garbage itself
+            $items[$key] = $this->createCacheItem($key, true, $itemData['value'], $itemData['meta']);
         }
 
-        if ($invalidItemKeys) {
-            $this->pool->deleteItems($invalidItemKeys);
-        }
+        $this->evictInvalidItems($invalidItemKeys);
 
         return $items;
     }
 
-    abstract protected function createCacheItem(string $key, ?array $value, bool $isHit): CacheItem;
+    /**
+     * Evicts items from pool.
+     *
+     * Called when expired items retrieved from the pool.
+     *
+     * @param array $expiredItemKeys
+     *
+     * @throws \Psr\Cache\InvalidArgumentException
+     */
+    protected function evictExpiredItems(array $expiredItemKeys)
+    {
+        if ($expiredItemKeys) {
+            $this->pool->deleteItems($expiredItemKeys);
+        }
+    }
+    /**
+     * Evicts items from pool.
+     *
+     * Called when items with invalid structure or with invalidated tag versions retrieved from pool.
+     *
+     * @param array $invalidItemKeys
+     *
+     * @throws \Psr\Cache\InvalidArgumentException
+     */
+    protected function evictInvalidItems(array $invalidItemKeys)
+    {
+        if ($invalidItemKeys) {
+            $this->pool->deleteItems($invalidItemKeys);
+        }
+    }
 
-    abstract protected function isStructureValid($value): bool;
-
-    abstract protected function containsInvalidTags($value, array $tagVersions): bool;
+    protected function createCacheItem(string $key, bool $isHit = false, $value = null, array $metadata = []): CacheItem
+    {
+        return ($this->createCacheItem)($key, $isHit, $value, $metadata);
+    }
 
     /**
      * {@inheritdoc}
      */
     public function clear(string $prefix = ''): bool
     {
+        if ($this->pool instanceof AdapterInterface) {
+            $isPoolCleared = $this->pool->clear($prefix);
+        } else {
+            $isPoolCleared = $this->pool->clear();
+        }
+
+        if ($this->tagPool instanceof AdapterInterface) {
+            $isTagPoolCleared = $this->tagPool->clear($prefix);
+        } else {
+            $isTagPoolCleared = $this->tagPool->clear();
+        }
+
         if ('' !== $prefix) {
             foreach ($this->deferred as $key => $item) {
                 if (str_starts_with($key, $prefix)) {
@@ -174,11 +345,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             $this->deferred = [];
         }
 
-        if ($this->pool instanceof AdapterInterface) {
-            return $this->pool->clear($prefix);
-        }
-
-        return $this->pool->clear();
+        return $isPoolCleared && $isTagPoolCleared;
     }
 
     /**
@@ -225,7 +392,9 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function invalidateTags(array $tags): bool
     {
-        return $this->tagPool->deleteItems($tags);
+        $tagIdsMap = $this->getTagIdsMap($tags);
+
+        return $this->tagPool->deleteItems(\array_keys($tagIdsMap));
     }
 
     /**
@@ -241,21 +410,15 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
 
         $uniqueTags = $this->extractTagsFromItems($this->deferred);
         $tagVersions = $this->getTagVersions($uniqueTags);
-        $valuesByKey = $this->computeValues($this->deferred, $tagVersions);
-        $allItemsAreValid = \count($this->deferred) === \count($valuesByKey);
+        $packedItemsByKey = $this->packItems($this->deferred, $tagVersions);
+        $allItemsArePacked = \count($this->deferred) === \count($packedItemsByKey);
         $this->deferred = [];
-        foreach ($valuesByKey as $item) {
+        foreach ($packedItemsByKey as $item) {
             $this->pool->saveDeferred($item);
         }
 
-        return $this->pool->commit() && $allItemsAreValid;
+        return $this->pool->commit() && $allItemsArePacked;
     }
-
-    abstract protected function extractTagVersionsFromValue($value): array;
-
-    abstract protected function extractTagsFromItems(iterable $items): array;
-
-    abstract protected function computeValues(iterable $items, array $tagVersions): array;
 
     public function __sleep()
     {
@@ -276,9 +439,38 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     }
 
     /**
+     * @param CacheItem[]|iterable $items
+     * @return array
+     */
+    protected function extractTagsFromItems(iterable $items): array
+    {
+        return ($this->extractTagsFromItems)($items);
+    }
+
+    /**
+     * Computes item values and packs them with item tags' versions
+     * into a new items for storing in the item pool.
+     *
+     * @param ItemInterface[]|iterable $items
+     * @param array $tagVersions
+     *
+     * @return CacheItemInterface[]  Items with all packed data as a value
+     */
+    abstract protected function packItems(iterable $items, array $tagVersions): array;
+
+    /**
+     * Unpacks an item retrieved from the item pool.
+     *
+     * @param CacheItemInterface $item
+     *
+     * @return array{value: mixed, tagVersions: array}
+     */
+    abstract protected function unpackItem(CacheItemInterface $item): array;
+
+    /**
      * Gets tags from a tag storage or from its own "cache".
      *
-     * May return only a part of requested tags or even none of them in case of technical issues.
+     * May return only a part of requested tags or even none of them if for some reason they cannot be read or created.
      *
      * @param array $tags
      *
@@ -286,12 +478,19 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      *
      * @return string[]     Tag versions indexed by tag keys
      */
-    abstract protected function getTagVersions(array $tags): array;
+    protected function getTagVersions(array $tags): array
+    {
+        if (!$tags) {
+            return [];
+        }
+
+        return $this->retrieveTagVersions($tags);
+    }
 
     /**
-     * Loads tags from or creates new ones in a tag storage.
+     * Loads tags from or creates new ones in a tag pool.
      *
-     * May return only a part of requested tags or even none of them in case of technical issues.
+     * May return only a part of requested tags or even none of them if for some reason they cannot be read or created.
      *
      * @param array $tags
      *
@@ -304,13 +503,14 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         $tagIds = $this->getTagIdsMap($tags);
         \ksort($tagIds);
 
+        // Use of one stamp for many tags is good; when they are stored together, igbinary has 'compact_string' option for them
+        $tagVersion = $this->generateTagVersion();
         $tagVersions = $generated = [];
         foreach ($this->tagPool->getItems(\array_keys($tagIds)) as $tagId => $version) {
-            if ($version->isHit() && $tagVersion = $version->get()) {
+            if ($version->isHit() && is_scalar($tagVersion = $version->get())) {
                 $tagVersions[$tagIds[$tagId]] = $tagVersion;
                 continue;
             }
-            $tagVersion = $this->generateTagVersion();
             $version->set($tagVersion);
             $this->tagPool->saveDeferred($version);
             $generated[$tagIds[$tagId]] = $tagVersion;
@@ -346,5 +546,21 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      * @return string
      */
     abstract protected function generateTagVersion(): string;
+
+    /**
+     * Checks a set of tag versions against available current ones
+     *
+     * @param array $itemTagVersions    Item's tag versions
+     * @param array $tagVersions        Current tag version to test against
+     *
+     * @return bool True if all item's tag versions match current ones
+     */
+    private function isTagVersionsValid(array $itemTagVersions, array $tagVersions): bool
+    {
+        ksort($itemTagVersions);
+        ksort($tagVersions);
+
+        return $itemTagVersions === \array_intersect_key($tagVersions, $itemTagVersions);
+    }
 
 }
