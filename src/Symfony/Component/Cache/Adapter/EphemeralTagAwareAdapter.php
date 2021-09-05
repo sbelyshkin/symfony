@@ -22,7 +22,7 @@ use Symfony\Component\Cache\CacheItem;
  * Defines an opinionated formats and algorithms for generating tag versions and packing item's value,
  * tag versions and item's metadata into a single value to be stored.
  *
- * Provides Optimistic Concurrency by allowing deferred computation of the item's value
+ * Provides passive Optimistic Concurrency Control by allowing deferred computation of item's value
  * which starts only after obtaining attached tags' versions.
  *
  * @link https://en.wikipedia.org/wiki/Optimistic_concurrency_control

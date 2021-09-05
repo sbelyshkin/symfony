@@ -44,7 +44,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      * guaranteed tag-based invalidation to volatile storages which are commonly used for storing ephemeral data.
      * Usually, it's an LRU-caches but Redis has an options for its eviction policy. Along with 'allkeys-lru'
      * and 'allkeys-random', there are 'volatile-lru', 'volatile-random' and 'volatile-ttl' policies which instruct
-     * Redis to evict only items with expire set when the memory limit was reached.
+     * Redis to evict only items with expire set when the memory limit is reached.
      *
      * In order to prevent the "Out Of Memory" state, Adapter uses non-zero default lifetime for tags and items.
      *
@@ -60,7 +60,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
     /**
      * Lifetime for tags.
      *
-     * This value is calculated by Adapter based on default life time for items. When the default lifetime is 0,
+     * This value is calculated by Adapter based on default lifetime for items. When default lifetime is 0,
      * lifetime for tags will also be 0, in other cases it's always greater than the given default lifetime and
      * not less than DEFAULT_CACHE_TTL. This rule makes it more likely that tags won't expire prior to items
      * and gives tags more chances over items to survive rounds of eviction when 'volatile-ttl' policy is chosen.
@@ -73,7 +73,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      */
     protected $namespace = '';
     /**
-     * Strategy which creates \Generator of SET NX instructions for specific redis client.
+     * Strategy which creates Generator of SET NX instructions for specific redis client.
      *
      * @var Closure
      */
@@ -84,10 +84,10 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      * it's good to pass planned maximum TTL as a default lifetime to give the Adapter a hint on TTL value for tags.
      *
      * @param \Redis|\RedisArray|\RedisCluster|\Predis\ClientInterface  $redisClient     The redis client
-     * @param CacheItemPoolInterface|null                               $itemPool        The pool for items
+     * @param CacheItemPoolInterface|null                               $itemPool        The cache pool for items
      * @param string                                                    $namespace       The namespace for tags (and for items if item pool is not provided)
      * @param int                                                       $defaultLifetime The default lifetime for items (expected maximal)
-     * @param MarshallerInterface|null                                  $marshaller      THe marshaller for items
+     * @param MarshallerInterface|null                                  $marshaller      The marshaller for items
      */
     public function __construct($redisClient, CacheItemPoolInterface $itemPool = null, string $namespace = '', int $defaultLifetime = self::DEFAULT_CACHE_TTL, MarshallerInterface $marshaller = null)
     {
@@ -146,7 +146,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
             if (true !== $result && (!$result instanceof Status || Status::get('OK') !== $result)) {
                 continue;
             }
-            // Return only existing tag versions
+            // Return only known tag versions
             $tagVersions[$tagIds[$id]] = $tagVersion;
         }
 

@@ -163,62 +163,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         return $this->createCacheItem($key);
     }
 
-//    /**
-//     * {@inheritdoc}
-//     */
-//    public function getItems(array $keys = [])
-//    {
-//        if (!$keys) {
-//            return [];
-//        }
-//
-//        if ($this->deferred && \array_intersect_key($this->deferred, array_flip($keys))) {
-//            $this->commit();
-//        }
-//
-//        $invalidItemKeys = $items = $tags = [];
-//        foreach ($this->pool->getItems($keys) as $key => $item) {
-//            if (!$item->isHit()) {
-//                $items[$key] = $this->createCacheItem($key, null, false);
-//                continue;
-//            }
-//            $value = $item->get();
-//            // If the structure does not match what we expect, return an empty item and remove the value from pool
-//            if (!$this->isValueStructureValid($value)) {
-//                $items[$key] = $this->createCacheItem($key, null, false);
-//                $invalidItemKeys[] = $key;
-//                continue;
-//            }
-//            $tags += $this->extractTagVersionsFromValue($value);
-//            $items[$key] = $value;
-//        }
-//
-//        // Try to benefit from bulk operations, if supported by tags pool
-//        $tagVersions = $this->getTagVersions(\array_keys($tags));
-//
-//        foreach ($items as $key => $value) {
-//            if ($value instanceof CacheItem) {
-//                continue;
-//            }
-//
-//            if ($this->containsInvalidTags($value, $tagVersions)) {
-//                $items[$key] = $this->createCacheItem($key, null, false);
-//                $invalidItemKeys[] = $key;
-//                continue;
-//            }
-//
-//            $items[$key] = $this->createCacheItem($key, $value, true);
-//            // The item may be invalid due to its expiration and time discrepancy
-//            // but we won't delete it and let the cache collect the garbage itself
-//        }
-//
-//        if ($invalidItemKeys) {
-//            $this->pool->deleteItems($invalidItemKeys);
-//        }
-//
-//        return $items;
-//    }
-
     /**
      * {@inheritdoc}
      */
@@ -281,6 +225,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
 
         return $items;
     }
+
 
     /**
      * Evicts items from pool.
