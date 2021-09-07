@@ -11,7 +11,6 @@
 
 namespace Symfony\Component\Cache\Adapter;
 
-use PhpParser\Node\Expr\Closure;
 use Psr\Cache\CacheItemInterface;
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\CacheItem;
@@ -85,7 +84,10 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
                         $item->value = ($item->value)();
                     }
                     // Pack the value, tags and meta data.
-                    $value = ['v' => $item->value, 't' => $itemTagVersions];
+                    $value = ['$' => $item->value];
+                    if ($itemTagVersions) {
+                        $value['#'] = $itemTagVersions;
+                    }
                     if ($metadata) {
                         // Update item's creation time to represent real computation time
                         $ctime = $item->newMetadata[CacheItem::METADATA_CTIME] += (int) \ceil(1000 * (\microtime(true) - $startTime));
@@ -95,7 +97,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
                         // 2. CTIME is packed as an 8/16/24/32-bits integer. For reference, 24 bits are able to reflect
                         // intervals up to 4 hours 39 minutes 37 seconds and 215 ms, but in most cases 8 bits are enough.
                         $length = 4 + ($ctime <= 255 ? 1 : ($ctime <= 65535 ? 2 : ($ctime <= 16777215 ? 3 : 4)));
-                        $value['m'] = \substr(\pack('NV', (int) \ceil($metadata[CacheItem::METADATA_EXPIRY]), $ctime), 0, $length);
+                        $value['^'] = \substr(\pack('NV', (int) \ceil($metadata[CacheItem::METADATA_EXPIRY]), $ctime), 0, $length);
                     }
 
                     $item->metadata = $item->newMetadata;
@@ -174,7 +176,8 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
      */
     protected function isPackedValueStructureValid($value): bool
     {
-        return \is_array($value) && \count($value) <= 3 && (\array_keys($value) === ['v', 't'] || \array_keys($value) === ['v', 't', 'm']) && \is_array($value['t']);
+        return \is_array($value) && ((['$'] === ($keys = \array_keys($value)))
+                || ((['$', '#'] === $keys || ['$', '#', '^'] === $keys && \is_string($value['^'])) && \is_array($value['#'])));
     }
 
     /**
@@ -197,20 +200,20 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
         }
 
         $unpacked = [
-            'value' => $value['v'],
-            'tagVersions' => $value['t'],
+            'value' => $value['$'],
+            'tagVersions' => $value['#'] ?? [],
             'meta' => [],
         ];
 
-        if (isset($value['m']) && \is_string($value['m'])) {
-            $v = \unpack('Ne/Vc', str_pad($value['m'], 8, "\x00"));
-            $metadata[CacheItem::METADATA_EXPIRY] = $v['e'];
-            $metadata[CacheItem::METADATA_CTIME] = $v['c'];
+        if (isset($value['^'])) {
+            $m = \unpack('Ne/Vc', \str_pad($value['^'], 8, "\x00"));
+            $metadata[CacheItem::METADATA_EXPIRY] = $m['e'];
+            $metadata[CacheItem::METADATA_CTIME] = $m['c'];
             $unpacked['meta'] = $metadata;
         }
 
-        if ($value['t']) {
-            $tags = array_keys($value['t']);
+        if ($unpacked['tagVersions']) {
+            $tags = \array_keys($unpacked['tagVersions']);
             $unpacked['meta'][CacheItem::METADATA_TAGS] = \array_combine($tags, $tags);
         }
 

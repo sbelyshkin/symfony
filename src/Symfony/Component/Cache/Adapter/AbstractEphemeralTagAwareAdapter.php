@@ -11,8 +11,6 @@
 
 namespace Symfony\Component\Cache\Adapter;
 
-use phpDocumentor\Reflection\Types\Static_;
-use phpDocumentor\Reflection\Types\This;
 use Psr\Cache\CacheItemInterface;
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\CacheItem;
