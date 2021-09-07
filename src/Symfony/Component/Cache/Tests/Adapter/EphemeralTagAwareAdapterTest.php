@@ -119,7 +119,7 @@ class EphemeralTagAwareAdapterTest extends FilesystemTagAwareAdapterTest
         $this->assertTrue($cache->hasItem('foobar'));
         $this->assertTrue($cache->hasItem('barfoo'));
 
-        $cache->clear($cache::TAGS_PREFIX.'tagf');
+        $cache->clear($cache::TAG_PREFIX.'tagf');
         $this->assertFalse($this->hasTags($cache, 'tagfoo'));
         $this->assertTrue($this->hasTags($cache, 'tagbar'));
         $this->assertFalse($cache->hasItem('foobar'));
@@ -136,7 +136,7 @@ class EphemeralTagAwareAdapterTest extends FilesystemTagAwareAdapterTest
         $this->assertTrue($cache->hasItem('foobar'));
         $this->assertTrue($cache->hasItem('barfoo'));
 
-        $cache->clear($cache::TAGS_PREFIX);
+        $cache->clear($cache::TAG_PREFIX);
         $this->assertFalse($this->hasTags($cache, 'tagfoo'));
         $this->assertFalse($this->hasTags($cache, 'tagbar'));
         $this->assertFalse($cache->hasItem('foobar'));

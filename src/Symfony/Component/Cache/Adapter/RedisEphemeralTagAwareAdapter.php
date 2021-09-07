@@ -163,7 +163,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      */
     protected function getTagIdsMap(array $tags): array
     {
-        $fullPrefix = $this->namespace.static::TAGS_PREFIX;
+        $fullPrefix = $this->namespace.static::TAG_PREFIX;
         $tagIds = [];
         foreach ($tags as $tag) {
             $tagIds[$fullPrefix.$tag] = $tag;

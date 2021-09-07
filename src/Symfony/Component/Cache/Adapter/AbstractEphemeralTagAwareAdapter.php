@@ -43,7 +43,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     use ContractsTrait;
 
     public const ITEM_PREFIX = '$';
-    public const TAGS_PREFIX = '#';
+    public const TAG_PREFIX = '#';
 
     /**
      * @var CacheItemPoolInterface
@@ -471,7 +471,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     {
         $tagIds = [];
         foreach ($tags as $tag) {
-            $tagIds[static::TAGS_PREFIX.$tag] = $tag;
+            $tagIds[static::TAG_PREFIX.$tag] = $tag;
         }
 
         return $tagIds;
