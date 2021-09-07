@@ -13,7 +13,7 @@ namespace Symfony\Component\Cache\Tests\Adapter;
 
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\Adapter\RedisEphemeralTagAwareAdapter;
-use Symfony\Component\Cache\Adapter\RedisTagAwareAdapter;
+use Symfony\Component\Cache\CacheItem;
 use Symfony\Component\Cache\Traits\RedisProxy;
 
 /**
@@ -167,4 +167,54 @@ class RedisEphemeralTagAwareAdapterTest extends RedisAdapterTest
         // --- End --- Test clearing without any prefix
     }
 
+    function testPassiveOptimisticLock()
+    {
+        if (isset($this->skippedTests[__FUNCTION__])) {
+            $this->markTestSkipped($this->skippedTests[__FUNCTION__]);
+        }
+
+        $cache = $this->createCachePool(0, __FUNCTION__);
+        $value = mt_rand();
+
+        // ---
+        $cache->delete('foo');
+        $this->assertSame($value, $cache->get('foo', function (CacheItem $item) use ($value, $cache) {
+            $this->assertSame('foo', $item->getKey());
+            $item->tag(['tag1', 'tag2']);
+            $cache->invalidateTags(['tag1']); // emulate invalidation in between getItem() and save() inside get()
+
+            return $value;
+        }));
+        $item = $cache->getItem('foo');
+        $this->assertTrue($item->isHit());
+        $this->assertSame($value, $item->get());
+
+        // ---
+        $cache->delete('foo');
+        $this->assertSame($value.'&'.$value, $cache->get('foo', function (CacheItem $item) use ($value, $cache) {
+            $this->assertSame('foo', $item->getKey());
+            $item->tag(['tag1', 'tag2']);
+            $cache->invalidateTags(['tag1']); // emulate invalidation in between getItem() and save() inside get()
+
+            return function () use ($value) { return $value.'&'.$value; };
+        }));
+        $item = $cache->getItem('foo');
+        $this->assertTrue($item->isHit());
+        $this->assertSame($value.'&'.$value, $item->get());
+
+        // ---
+        $cache->delete('foo');
+        $this->assertSame($value.'@'.$value, $cache->get('foo', function (CacheItem $item, $save) use ($value, $cache) {
+            $this->assertSame('foo', $item->getKey());
+            $item->tag(['tag1', 'tag2']);
+
+            return function () use ($value, $cache) {
+                $cache->invalidateTags(['tag2']); // emulate invalidation in between getTagVersions() and commit() inside save()
+                return $value.'@'.$value;
+            };
+        }));
+        $item = $cache->getItem('foo');
+        $this->assertFalse($item->isHit());
+        $this->assertNull($item->get());
+    }
 }

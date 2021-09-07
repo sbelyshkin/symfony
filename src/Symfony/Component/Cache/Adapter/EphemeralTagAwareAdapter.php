@@ -58,25 +58,21 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
                 foreach ($deferred as $key => $item) {
                     $startTime = \microtime(true);
                     $key = (string) $key;
+                    // Compute the value in case it's passed as a callback function
+                    if ($item->value instanceof \Closure) {
+                        $item->value = ($item->value)();
+                    }
                     $itemTagVersions = [];
                     $metadata = $item->newMetadata;
                     if (isset($metadata[CacheItem::METADATA_TAGS])) {
                         foreach ($metadata[CacheItem::METADATA_TAGS] as $tag) {
                             if (!isset($tagVersions[$tag])) {
-                                // Don't compute the value
-                                if ($item->value instanceof \Closure) {
-                                    $item->value = null;
-                                }
                                 // Don't save items without full set of valid tags
                                 continue 2;
                             }
                             $itemTagVersions[$tag] = $tagVersions[$tag];
                         }
                         unset($metadata[CacheItem::METADATA_TAGS]);
-                    }
-                    // Compute the value in case it's passed as a callback function
-                    if ($item->value instanceof \Closure) {
-                        $item->value = ($item->value)();
                     }
                     // Pack the value, tags and meta data.
                     $value = ['$' => $item->value];
