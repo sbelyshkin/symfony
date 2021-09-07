@@ -40,10 +40,10 @@ use Symfony\Contracts\Cache\TagAwareCacheInterface;
  */
 abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterface, TagAwareCacheInterface, PruneableInterface, ResettableInterface
 {
-    public const ITEM_PREFIX = '$';
-    public const TAGS_PREFIX = "#";
-
     use ContractsTrait;
+
+    public const ITEM_PREFIX = '$';
+    public const TAGS_PREFIX = '#';
 
     /**
      * @var CacheItemPoolInterface
@@ -66,11 +66,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     private $extractTagsFromItems;
 
-    /**
-     *
-     * @param CacheItemPoolInterface $itemPool
-     * @param CacheItemPoolInterface|null $tagPool
-     */
     public function __construct(CacheItemPoolInterface $itemPool, CacheItemPoolInterface $tagPool = null)
     {
         $this->pool = $itemPool;
@@ -106,7 +101,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             null,
             CacheItem::class
         );
-
     }
 
     /**
@@ -225,13 +219,10 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         return $items;
     }
 
-
     /**
      * Evicts items from pool.
      *
      * Called when expired items retrieved from the pool.
-     *
-     * @param array $expiredItemKeys
      *
      * @throws \Psr\Cache\InvalidArgumentException
      */
@@ -241,12 +232,11 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             $this->deleteItems($expiredItemKeys);
         }
     }
+
     /**
      * Evicts items from pool.
      *
      * Called when items with invalid structure or with invalidated tag versions retrieved from pool.
-     *
-     * @param array $invalidItemKeys
      *
      * @throws \Psr\Cache\InvalidArgumentException
      */
@@ -387,7 +377,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
 
     /**
      * @param CacheItem[]|iterable $items
-     * @return array
      */
     protected function extractTagsFromItems(iterable $items): array
     {
@@ -399,16 +388,13 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      * into a new items for storing in the item pool.
      *
      * @param ItemInterface[]|iterable $items
-     * @param array $tagVersions
      *
-     * @return CacheItemInterface[]  Items with all packed data as a value
+     * @return CacheItemInterface[] Items with all packed data as a value
      */
     abstract protected function packItems(iterable $items, array $tagVersions): array;
 
     /**
      * Unpacks an item retrieved from the item pool.
-     *
-     * @param CacheItemInterface $item
      *
      * @return array{value: mixed, tagVersions: array, meta: array}
      */
@@ -419,11 +405,9 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      *
      * May return only a part of requested tags or even none of them if for some reason they cannot be read or created.
      *
-     * @param array $tags
-     *
      * @throws \Psr\Cache\InvalidArgumentException
      *
-     * @return string[]     Tag versions indexed by tag keys
+     * @return string[] Tag versions indexed by tag keys
      */
     protected function getTagVersions(array $tags): array
     {
@@ -439,8 +423,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      *
      * May return only a part of requested tags or even none of them if for some reason they cannot be read or created.
      *
-     * @param array $tags
-     *
      * @throws \Psr\Cache\InvalidArgumentException
      *
      * @return string[]
@@ -454,7 +436,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         $newTagVersion = $this->generateTagVersion();
         $tagVersions = $generated = [];
         foreach ($this->tagPool->getItems(\array_keys($tagIds)) as $tagId => $version) {
-            if ($version->isHit() && is_scalar($tagVersion = $version->get())) {
+            if ($version->isHit() && \is_scalar($tagVersion = $version->get())) {
                 $tagVersions[$tagIds[$tagId]] = $tagVersion;
                 continue;
             }
@@ -472,8 +454,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
 
     /**
      * @param $key
-     *
-     * @return string
      */
     protected function getPrefixedKey($key): string
     {
@@ -483,41 +463,38 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     /**
      * Returns tag IDs to tag keys map.
      *
-     * @param string[] $tags    Tag keys
+     * @param string[] $tags Tag keys
      *
-     * @return array            Tag IDs to tag keys map
+     * @return array Tag IDs to tag keys map
      */
     protected function getTagIdsMap(array $tags): array
     {
         $tagIds = [];
         foreach ($tags as $tag) {
-            $tagIds[static::TAGS_PREFIX . $tag] = $tag;
+            $tagIds[static::TAGS_PREFIX.$tag] = $tag;
         }
 
         return $tagIds;
     }
 
     /**
-     * Generates unique string for robust tag versioning
-     *
-     * @return string
+     * Generates unique string for robust tag versioning.
      */
     abstract protected function generateTagVersion(): string;
 
     /**
-     * Checks a set of tag versions against available current ones
+     * Checks a set of tag versions against available current ones.
      *
-     * @param array $itemTagVersions    Item's tag versions
-     * @param array $tagVersions        Current tag version to test against
+     * @param array $itemTagVersions Item's tag versions
+     * @param array $tagVersions     Current tag version to test against
      *
      * @return bool True if all item's tag versions match current ones
      */
     private function isTagVersionsValid(array $itemTagVersions, array $tagVersions): bool
     {
-        ksort($itemTagVersions);
-        ksort($tagVersions);
+        \ksort($itemTagVersions);
+        \ksort($tagVersions);
 
         return $itemTagVersions === \array_intersect_key($tagVersions, $itemTagVersions);
     }
-
 }

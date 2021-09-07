@@ -38,6 +38,9 @@ use Symfony\Component\Cache\Traits\RedisTrait;
  */
 class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements LoggerAwareInterface
 {
+    use LoggerAwareTrait;
+    use RedisTrait;
+
     /**
      * While this Adapter can undoubtedly be used for dealing with persistent data, one of its aims is to provide
      * guaranteed tag-based invalidation to volatile storages which are commonly used for storing ephemeral data.
@@ -47,14 +50,11 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      *
      * In order to prevent the "Out Of Memory" state, Adapter uses non-zero default lifetime for tags and items.
      *
-     * @link https://redis.io/topics/lru-cache
+     * @see https://redis.io/topics/lru-cache
      *
      * After all, ephemeral literally means existing only one day :-)
      */
     private const DEFAULT_CACHE_TTL = 86400;
-
-    use LoggerAwareTrait;
-    use RedisTrait;
 
     /**
      * Lifetime for tags.
@@ -82,11 +82,11 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      * Hint: if you plan to store (all or some of) tagged items for about or more than DEFAULT_CACHE_TTL, then
      * it's good to pass planned maximum TTL as a default lifetime to give the Adapter a hint on TTL value for tags.
      *
-     * @param \Redis|\RedisArray|\RedisCluster|\Predis\ClientInterface  $redisClient     The redis client
-     * @param CacheItemPoolInterface|null                               $itemPool        The cache pool for items
-     * @param string                                                    $namespace       The namespace for tags (and for items if item pool is not provided)
-     * @param int                                                       $defaultLifetime The default lifetime for items (expected maximal)
-     * @param MarshallerInterface|null                                  $marshaller      The marshaller for items
+     * @param \Redis|\RedisArray|\RedisCluster|\Predis\ClientInterface $redisClient     The redis client
+     * @param CacheItemPoolInterface|null                              $itemPool        The cache pool for items
+     * @param string                                                   $namespace       The namespace for tags (and for items if item pool is not provided)
+     * @param int                                                      $defaultLifetime The default lifetime for items (expected maximal)
+     * @param MarshallerInterface|null                                 $marshaller      The marshaller for items
      */
     public function __construct($redisClient, CacheItemPoolInterface $itemPool = null, string $namespace = '', int $defaultLifetime = self::DEFAULT_CACHE_TTL, MarshallerInterface $marshaller = null)
     {
@@ -105,12 +105,12 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
         parent::clearLastRetrievedTagVersions();
         $tagIdsMap = $this->getTagIdsMap($tags);
 
-        return $this->doDelete(\array_keys($tagIdsMap));
+        return $this->doDelete(array_keys($tagIdsMap));
     }
 
     public function clear(string $prefix = ''): bool
     {
-        $this->doClear($this->namespace . $prefix);
+        $this->doClear($this->namespace.$prefix);
 
         return parent::clear($prefix);
     }
@@ -163,10 +163,10 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      */
     protected function getTagIdsMap(array $tags): array
     {
-        $fullPrefix = $this->namespace . static::TAGS_PREFIX;
+        $fullPrefix = $this->namespace.static::TAGS_PREFIX;
         $tagIds = [];
         foreach ($tags as $tag) {
-            $tagIds[$fullPrefix . $tag] = $tag;
+            $tagIds[$fullPrefix.$tag] = $tag;
         }
 
         return $tagIds;
@@ -174,8 +174,6 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
 
     /**
      * Refresh TTL of the given tags.
-     *
-     * @param array $tagIds
      */
     private function refreshTagIds(array $tagIds): void
     {
@@ -228,10 +226,11 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
 
         return \array_filter($values, static function($v) { return \is_string($v); });
     }
+
     /**
-     * @param \Redis|\RedisArray|\RedisCluster|\Predis\ClientInterface  $redisClient
-     * @param string                                                    $namespace
-     * @param int                                                       $defaultLifetime
+     * @param \Redis|\RedisArray|\RedisCluster|\Predis\ClientInterface $redisClient
+     * @param string                                                   $namespace
+     * @param int                                                      $defaultLifetime
      */
     private function init($redisClient, string $namespace, int $defaultLifetime)
     {
@@ -281,11 +280,10 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
 
         if ($redisClient instanceof \Predis\ClientInterface && $redisClient->getOptions()->exceptions) {
             $options = clone $redisClient->getOptions();
-            \Closure::bind(function () {$this->options['exceptions'] = false;}, $options, $options)();
+            \Closure::bind(function () { $this->options['exceptions'] = false; }, $options, $options)();
             $redisClient = new $redisClient($redisClient->getConnection(), $options);
         }
 
         $this->redis = $redisClient;
     }
-
 }

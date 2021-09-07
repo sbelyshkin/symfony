@@ -25,8 +25,8 @@ use Symfony\Component\Cache\CacheItem;
  * Provides passive Optimistic Concurrency Control by allowing deferred computation of item's value
  * which starts only after obtaining attached tags' versions.
  *
- * @link https://en.wikipedia.org/wiki/Optimistic_concurrency_control
- * @link https://en.wikipedia.org/wiki/Load-link/store-conditional
+ * @see https://en.wikipedia.org/wiki/Optimistic_concurrency_control
+ * @see https://en.wikipedia.org/wiki/Load-link/store-conditional
  *
  * @author Sergey Belyshkin <sbelyshkin@gmail.com>
  */
@@ -45,16 +45,11 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
      */
     private $computeAndPackItems;
 
-    /**
-     *
-     * @param CacheItemPoolInterface $itemPool
-     * @param CacheItemPoolInterface|null $tagPool
-     */
     public function __construct(CacheItemPoolInterface $itemPool, CacheItemPoolInterface $tagPool = null)
     {
         parent::__construct($itemPool, $tagPool);
         $this->setCallbackWrapper(null);
-        $this->instanceId = \pack('N', \crc32(\getmypid() . '@' . \gethostname()));
+        $this->instanceId = \pack('N', \crc32(\getmypid().'@'.\gethostname()));
 
         $getPrefixedKeyMethod = \Closure::fromCallable([$this, 'getPrefixedKey']);
         $this->computeAndPackItems = \Closure::bind(
@@ -115,7 +110,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
             null,
             CacheItem::class
         );
-
     }
 
     /**
@@ -172,7 +166,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
      * Checks if the structure of the given value meets the format used for packed values.
      *
      * @param $value
-     * @return bool
      */
     protected function isPackedValueStructureValid($value): bool
     {
@@ -235,8 +228,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
      *
      * May return only a part of requested tags or even none of them in case of technical issues.
      *
-     * @param array $tags
-     *
      * @throws \Psr\Cache\InvalidArgumentException
      *
      * @return string[]
@@ -261,14 +252,11 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     }
 
     /**
-     * Generates unique string for robust tag versioning
-     *
-     * @return string
+     * Generates unique string for robust tag versioning.
      */
     protected function generateTagVersion(): string
     {
         // Add an instance ID to preclude the possibility of ABA problem
-        return \pack('N', \mt_rand()) . $this->instanceId;
+        return \pack('N', \mt_rand()).$this->instanceId;
     }
-
 }
