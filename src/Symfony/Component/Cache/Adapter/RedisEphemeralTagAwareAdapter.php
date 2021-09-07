@@ -38,7 +38,6 @@ use Symfony\Component\Cache\Traits\RedisTrait;
  */
 class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements LoggerAwareInterface
 {
-    public const NS_SEPARATOR = ':';
     /**
      * While this Adapter can undoubtedly be used for dealing with persistent data, one of its aims is to provide
      * guaranteed tag-based invalidation to volatile storages which are commonly used for storing ephemeral data.
@@ -94,7 +93,6 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
         $this->init($redisClient, $namespace, $defaultLifetime);
         if (null === $itemPool) {
             $itemPool = new RedisAdapter($redisClient, $namespace, $defaultLifetime, $marshaller);
-            $this->tagIdPrefix = static::TAGS_PREFIX;
         }
         parent::__construct($itemPool, $itemPool);
     }
@@ -108,6 +106,13 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
         $tagIdsMap = $this->getTagIdsMap($tags);
 
         return $this->doDelete(\array_keys($tagIdsMap));
+    }
+
+    public function clear(string $prefix = ''): bool
+    {
+        $this->doClear($this->namespace . $prefix);
+
+        return parent::clear($prefix);
     }
 
     /**
@@ -137,9 +142,9 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
             return $tagVersions;
         }
 
-        $tagVersion = $this->generateTagVersion();
+        $newTagVersion = $this->generateTagVersion();
 
-        $results = $this->pipeline(($this->setNxGenerator)($tagIds, $tagVersion, $this->tagsLifetime));
+        $results = $this->pipeline(($this->setNxGenerator)($tagIds, $newTagVersion, $this->tagsLifetime));
 
         foreach ($results as $id => $result) {
             // SET NX results
@@ -147,7 +152,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
                 continue;
             }
             // Return only known tag versions
-            $tagVersions[$tagIds[$id]] = $tagVersion;
+            $tagVersions[$tagIds[$id]] = $newTagVersion;
         }
 
         return $tagVersions;
@@ -160,7 +165,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
     {
         $tagIds = [];
         foreach ($tags as $tag) {
-            $tagIds[$this->namespace . $this->tagIdPrefix . $tag] = $tag;
+            $tagIds[$this->namespace . static::TAGS_PREFIX . $tag] = $tag;
         }
 
         return $tagIds;
@@ -238,7 +243,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
         }
 
         $this->tagsLifetime = 0 < $defaultLifetime ? \max(static::DEFAULT_CACHE_TTL / 3, $defaultLifetime) * 3 : 0;
-        $this->namespace = '' === $namespace ? '' : $namespace . static::NS_SEPARATOR;
+        $this->namespace = '' === $namespace ? '' : $namespace.':';
 
         if ($this->tagsLifetime) {
             // Advanced options of SET operation have to be passed in a form specific to the redis client

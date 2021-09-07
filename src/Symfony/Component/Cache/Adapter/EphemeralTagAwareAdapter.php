@@ -11,6 +11,7 @@
 
 namespace Symfony\Component\Cache\Adapter;
 
+use PhpParser\Node\Expr\Closure;
 use Psr\Cache\CacheItemInterface;
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\CacheItem;
@@ -56,9 +57,10 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
         $this->setCallbackWrapper(null);
         $this->instanceId = \pack('N', \crc32(\getmypid() . '@' . \gethostname()));
 
+        $getPrefixedKeyMethod = \Closure::fromCallable([$this, 'getPrefixedKey']);
         $this->computeAndPackItems = \Closure::bind(
-            static function ($deferred, $tagVersions) {
-                $valuesByKey = [];
+            static function ($deferred, $tagVersions) use ($getPrefixedKeyMethod) {
+                $packedItems = [];
                 foreach ($deferred as $key => $item) {
                     $startTime = \microtime(true);
                     $key = (string) $key;
@@ -96,15 +98,17 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
                         $value['m'] = \substr(\pack('NV', (int) \ceil($metadata[CacheItem::METADATA_EXPIRY]), $ctime), 0, $length);
                     }
 
+                    $item->metadata = $item->newMetadata;
+
                     $packedItem = new CacheItem();
-                    $packedItem->key = $key;
+                    $packedItem->key = $getPrefixedKeyMethod($key);
                     $packedItem->value = $value;
                     $packedItem->expiry = $item->expiry;
 
-                    $valuesByKey[$key] = $packedItem;
+                    $packedItems[$key] = $packedItem;
                 }
 
-                return $valuesByKey;
+                return $packedItems;
             },
             null,
             CacheItem::class
@@ -170,7 +174,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
      */
     protected function isPackedValueStructureValid($value): bool
     {
-        return \is_array($value) && \count($value) <= 3 && isset($value['v'], $value['t']) && \is_array($value['t']);
+        return \is_array($value) && \count($value) <= 3 && (\array_keys($value) === ['v', 't'] || \array_keys($value) === ['v', 't', 'm']) && \is_array($value['t']);
     }
 
     /**
@@ -183,8 +187,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
 
     /**
      * {@inheritdoc}
-     *
-     * @return array{value: mixed, tagVersions: array, meta: array}
      */
     protected function unpackItem(CacheItemInterface $item): array
     {

@@ -11,6 +11,8 @@
 
 namespace Symfony\Component\Cache\Adapter;
 
+use phpDocumentor\Reflection\Types\Static_;
+use phpDocumentor\Reflection\Types\This;
 use Psr\Cache\CacheItemInterface;
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\CacheItem;
@@ -40,8 +42,8 @@ use Symfony\Contracts\Cache\TagAwareCacheInterface;
  */
 abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterface, TagAwareCacheInterface, PruneableInterface, ResettableInterface
 {
-    //public const ITEM_PREFIX = '$'; // like in PHP
-    public const TAGS_PREFIX = "\0tags\0"; // '#' // just like in our daily lives :)
+    public const ITEM_PREFIX = '$';
+    public const TAGS_PREFIX = "#";
 
     use ContractsTrait;
 
@@ -53,10 +55,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      * @var CacheItemPoolInterface
      */
     private $tagPool;
-    /**
-     * @var string
-     */
-    protected $tagIdPrefix = '';
     /**
      * @var CacheItem[]
      */
@@ -81,7 +79,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         $this->tagPool = $tagPool;
         if (!$tagPool) {
             $this->tagPool = $itemPool;
-            $this->tagIdPrefix = static::TAGS_PREFIX;
         }
 
         $this->createCacheItem = \Closure::bind(
@@ -142,7 +139,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             $this->commit();
         }
 
-        if (!$this->pool->hasItem($key)) {
+        if (!$this->pool->hasItem($this->getPrefixedKey($key))) {
             return false;
         }
 
@@ -176,8 +173,11 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             $this->commit();
         }
 
+        $prefixedKeys = \array_map([$this, 'getPrefixedKey'], $keys);
+        $itemIdsMap = \array_combine($prefixedKeys, $keys);
         $expiredItemKeys = $invalidItemKeys = $items = $tags = [];
-        foreach ($this->pool->getItems($keys) as $key => $item) {
+        foreach ($this->pool->getItems($prefixedKeys) as $itemId => $item) {
+            $key = $itemIdsMap[$itemId];
             if (!$item->isHit()) {
                 $items[$key] = null;
                 continue;
@@ -191,7 +191,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
                 continue;
             }
 
-            // Even if cache tracks item's TTL, the item may be expired because of time discrepancy
+            // Even if cache storage tracks item's TTL, the item may be expired because of time discrepancy
             if (isset($itemData['meta'][CacheItem::METADATA_EXPIRY]) && $itemData['meta'][CacheItem::METADATA_EXPIRY] < \microtime(true)) {
                 $expiredItemKeys[] = $key;
                 $items[$key] = null;
@@ -203,6 +203,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         }
 
         $this->evictExpiredItems($expiredItemKeys);
+        $prefixedKeys = $itemIdsMap = $expiredItemKeys = null;
 
         $tagVersions = $this->getTagVersions(\array_keys($tags));
 
@@ -239,7 +240,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     protected function evictExpiredItems(array $expiredItemKeys)
     {
         if ($expiredItemKeys) {
-            $this->pool->deleteItems($expiredItemKeys);
+            $this->deleteItems($expiredItemKeys);
         }
     }
     /**
@@ -254,7 +255,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     protected function evictInvalidItems(array $invalidItemKeys)
     {
         if ($invalidItemKeys) {
-            $this->pool->deleteItems($invalidItemKeys);
+            $this->deleteItems($invalidItemKeys);
         }
     }
 
@@ -298,6 +299,8 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function deleteItem($key): bool
     {
+        $key = $this->getPrefixedKey($key);
+
         return $this->pool->deleteItem($key);
     }
 
@@ -306,7 +309,9 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function deleteItems(array $keys): bool
     {
-        return $this->pool->deleteItems($keys);
+        $prefixedKeys = \array_map([$this, 'getPrefixedKey'], $keys);
+
+        return $this->pool->deleteItems($prefixedKeys);
     }
 
     /**
@@ -352,13 +357,12 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         if (!$this->deferred) {
             return true;
         }
-
         $uniqueTags = $this->extractTagsFromItems($this->deferred);
         $tagVersions = $this->getTagVersions($uniqueTags);
-        $packedItemsByKey = $this->packItems($this->deferred, $tagVersions);
-        $allItemsArePacked = \count($this->deferred) === \count($packedItemsByKey);
+        $packedItems = $this->packItems($this->deferred, $tagVersions);
+        $allItemsArePacked = \count($this->deferred) === \count($packedItems);
         $this->deferred = [];
-        foreach ($packedItemsByKey as $item) {
+        foreach ($packedItems as $item) {
             $this->pool->saveDeferred($item);
         }
 
@@ -408,7 +412,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      *
      * @param CacheItemInterface $item
      *
-     * @return array{value: mixed, tagVersions: array}
+     * @return array{value: mixed, tagVersions: array, meta: array}
      */
     abstract protected function unpackItem(CacheItemInterface $item): array;
 
@@ -449,16 +453,16 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         \ksort($tagIds);
 
         // Use of one stamp for many tags is good; when they are stored together, igbinary has 'compact_string' option for them
-        $tagVersion = $this->generateTagVersion();
+        $newTagVersion = $this->generateTagVersion();
         $tagVersions = $generated = [];
         foreach ($this->tagPool->getItems(\array_keys($tagIds)) as $tagId => $version) {
             if ($version->isHit() && is_scalar($tagVersion = $version->get())) {
                 $tagVersions[$tagIds[$tagId]] = $tagVersion;
                 continue;
             }
-            $version->set($tagVersion);
+            $version->set($newTagVersion);
             $this->tagPool->saveDeferred($version);
-            $generated[$tagIds[$tagId]] = $tagVersion;
+            $generated[$tagIds[$tagId]] = $newTagVersion;
         }
 
         if (!$generated || $this->tagPool->commit()) {
@@ -469,17 +473,27 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     }
 
     /**
-     * Returns tag cache IDs to tag keys map.
+     * @param $key
      *
-     * @param array $tags   Tag keys
+     * @return string
+     */
+    protected function getPrefixedKey($key): string
+    {
+        return static::ITEM_PREFIX.$key;
+    }
+
+    /**
+     * Returns tag IDs to tag keys map.
      *
-     * @return array        Tag IDs to tag keys map
+     * @param string[] $tags    Tag keys
+     *
+     * @return array            Tag IDs to tag keys map
      */
     protected function getTagIdsMap(array $tags): array
     {
         $tagIds = [];
         foreach ($tags as $tag) {
-            $tagIds[$this->tagIdPrefix . $tag] = $tag;
+            $tagIds[static::TAGS_PREFIX . $tag] = $tag;
         }
 
         return $tagIds;
