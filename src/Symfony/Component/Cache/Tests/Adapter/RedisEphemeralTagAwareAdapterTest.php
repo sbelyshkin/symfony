@@ -13,7 +13,6 @@ namespace Symfony\Component\Cache\Tests\Adapter;
 
 use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Component\Cache\Adapter\RedisEphemeralTagAwareAdapter;
-use Symfony\Component\Cache\CacheItem;
 use Symfony\Component\Cache\Traits\RedisProxy;
 
 /**
@@ -21,8 +20,8 @@ use Symfony\Component\Cache\Traits\RedisProxy;
  */
 class RedisEphemeralTagAwareAdapterTest extends RedisAdapterTest
 {
-    use TagAwareTestTrait;
     use EphemeralTagAwareTestTrait;
+    use TagAwareTestTrait;
 
     protected function setUp(): void
     {

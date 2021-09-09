@@ -161,12 +161,12 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             return [];
         }
 
-        if ($this->deferred && \array_intersect_key($this->deferred, \array_flip($keys))) {
+        if ($this->deferred && array_intersect_key($this->deferred, array_flip($keys))) {
             $this->commit();
         }
 
-        $prefixedKeys = \array_map([$this, 'getPrefixedKey'], $keys);
-        $itemIdsMap = \array_combine($prefixedKeys, $keys);
+        $prefixedKeys = array_map([$this, 'getPrefixedKey'], $keys);
+        $itemIdsMap = array_combine($prefixedKeys, $keys);
         $expiredItemKeys = $invalidItemKeys = $items = $tags = [];
         foreach ($this->pool->getItems($prefixedKeys) as $itemId => $item) {
             $key = $itemIdsMap[$itemId];
@@ -184,7 +184,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             }
 
             // Even if cache storage tracks item's TTL, the item may be expired because of time discrepancy
-            if (isset($itemData['meta'][CacheItem::METADATA_EXPIRY]) && $itemData['meta'][CacheItem::METADATA_EXPIRY] < \microtime(true)) {
+            if (isset($itemData['meta'][CacheItem::METADATA_EXPIRY]) && $itemData['meta'][CacheItem::METADATA_EXPIRY] < microtime(true)) {
                 $expiredItemKeys[] = $key;
                 $items[$key] = null;
                 continue;
@@ -197,7 +197,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         $this->evictExpiredItems($expiredItemKeys);
         $prefixedKeys = $itemIdsMap = $expiredItemKeys = null;
 
-        $tagVersions = $this->getTagVersions(\array_keys($tags));
+        $tagVersions = $this->getTagVersions(array_keys($tags));
 
         foreach ($items as $key => $itemData) {
             if (null === $itemData) {
@@ -297,7 +297,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function deleteItems(array $keys): bool
     {
-        $prefixedKeys = \array_map([$this, 'getPrefixedKey'], $keys);
+        $prefixedKeys = array_map([$this, 'getPrefixedKey'], $keys);
 
         return $this->pool->deleteItems($prefixedKeys);
     }
@@ -332,7 +332,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     {
         $tagIdsMap = $this->getTagIdsMap($tags);
 
-        return $this->tagPool->deleteItems(\array_keys($tagIdsMap));
+        return $this->tagPool->deleteItems(array_keys($tagIdsMap));
     }
 
     /**
@@ -430,13 +430,13 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     protected function retrieveTagVersions(array $tags): array
     {
         $tagIds = $this->getTagIdsMap($tags);
-        \ksort($tagIds);
+        ksort($tagIds);
 
         // Use of one stamp for many tags is good; when they are stored together, igbinary has 'compact_string' option for them
         $newTagVersion = $this->generateTagVersion();
         $tagVersions = $generated = [];
-        foreach ($this->tagPool->getItems(\array_keys($tagIds)) as $tagId => $version) {
-            if ($version->isHit() && \is_scalar($tagVersion = $version->get())) {
+        foreach ($this->tagPool->getItems(array_keys($tagIds)) as $tagId => $version) {
+            if ($version->isHit() && is_scalar($tagVersion = $version->get())) {
                 $tagVersions[$tagIds[$tagId]] = $tagVersion;
                 continue;
             }
@@ -492,9 +492,9 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     private function isTagVersionsValid(array $itemTagVersions, array $tagVersions): bool
     {
-        \ksort($itemTagVersions);
-        \ksort($tagVersions);
+        ksort($itemTagVersions);
+        ksort($tagVersions);
 
-        return $itemTagVersions === \array_intersect_key($tagVersions, $itemTagVersions);
+        return $itemTagVersions === array_intersect_key($tagVersions, $itemTagVersions);
     }
 }

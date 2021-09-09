@@ -49,14 +49,14 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     {
         parent::__construct($itemPool, $tagPool);
         $this->setCallbackWrapper(null);
-        $this->instanceId = \pack('N', \crc32(\getmypid().'@'.\gethostname()));
+        $this->instanceId = pack('N', crc32(getmypid().'@'.gethostname()));
 
         $getPrefixedKeyMethod = \Closure::fromCallable([$this, 'getPrefixedKey']);
         $this->computeAndPackItems = \Closure::bind(
             static function ($deferred, $tagVersions) use ($getPrefixedKeyMethod) {
                 $packedItems = [];
                 foreach ($deferred as $key => $item) {
-                    $startTime = \microtime(true);
+                    $startTime = microtime(true);
                     $key = (string) $key;
                     // Compute the value in case it's passed as a callback function
                     if ($item->value instanceof \Closure) {
@@ -81,14 +81,14 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
                     }
                     if ($metadata) {
                         // Update item's creation time to represent real computation time
-                        $ctime = $item->newMetadata[CacheItem::METADATA_CTIME] += (int) \ceil(1000 * (\microtime(true) - $startTime));
+                        $ctime = $item->newMetadata[CacheItem::METADATA_CTIME] += (int) ceil(1000 * (microtime(true) - $startTime));
                         // 1. 03:14:08 UTC on Tuesday, 19 January 2038 timestamp will reach 0x7FFFFFFF and 32-bit systems
                         // will go back to Unix Epoch, but on 64-bit systems it's OK to use first 32 bits of timestamp
                         // till 06:28:15 UTC on Sunday, 7 February 2106, when it'll reach 0xFFFFFFFF.
                         // 2. CTIME is packed as an 8/16/24/32-bits integer. For reference, 24 bits are able to reflect
                         // intervals up to 4 hours 39 minutes 37 seconds and 215 ms, but in most cases 8 bits are enough.
                         $length = 4 + ($ctime <= 255 ? 1 : ($ctime <= 65535 ? 2 : ($ctime <= 16777215 ? 3 : 4)));
-                        $value['^'] = \substr(\pack('NV', (int) \ceil($metadata[CacheItem::METADATA_EXPIRY]), $ctime), 0, $length);
+                        $value['^'] = substr(pack('NV', (int) ceil($metadata[CacheItem::METADATA_EXPIRY]), $ctime), 0, $length);
                     }
 
                     $item->metadata = $item->newMetadata;
@@ -165,7 +165,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
      */
     protected function isPackedValueStructureValid($value): bool
     {
-        return \is_array($value) && ((['$'] === ($keys = \array_keys($value)))
+        return \is_array($value) && ((['$'] === ($keys = array_keys($value)))
                 || ((['$', '#'] === $keys || ['$', '#', '^'] === $keys && \is_string($value['^'])) && \is_array($value['#'])));
     }
 
@@ -195,15 +195,15 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
         ];
 
         if (isset($value['^'])) {
-            $m = \unpack('Ne/Vc', \str_pad($value['^'], 8, "\x00"));
+            $m = unpack('Ne/Vc', str_pad($value['^'], 8, "\x00"));
             $metadata[CacheItem::METADATA_EXPIRY] = $m['e'];
             $metadata[CacheItem::METADATA_CTIME] = $m['c'];
             $unpacked['meta'] = $metadata;
         }
 
         if ($unpacked['tagVersions']) {
-            $tags = \array_keys($unpacked['tagVersions']);
-            $unpacked['meta'][CacheItem::METADATA_TAGS] = \array_combine($tags, $tags);
+            $tags = array_keys($unpacked['tagVersions']);
+            $unpacked['meta'][CacheItem::METADATA_TAGS] = array_combine($tags, $tags);
         }
 
         return $unpacked;
@@ -235,7 +235,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
         }
 
         if ($this->lastRetrievedTagVersions) {
-            $tagVersions = \array_intersect_key($this->lastRetrievedTagVersions, \array_flip($tags));
+            $tagVersions = array_intersect_key($this->lastRetrievedTagVersions, array_flip($tags));
             if (\count($tagVersions) === \count($tags)) {
                 // All requested tags are in the last retrieved set
                 return $tagVersions;
@@ -253,6 +253,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     protected function generateTagVersion(): string
     {
         // Add an instance ID to preclude the possibility of ABA problem
-        return \pack('N', \mt_rand()).$this->instanceId;
+        return pack('N', mt_rand()).$this->instanceId;
     }
 }

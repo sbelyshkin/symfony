@@ -130,7 +130,7 @@ trait EphemeralTagAwareTestTrait
         // --- End --- Test clearing without any prefix
     }
 
-    function testPassiveOptimisticLock()
+    public function testPassiveOptimisticLock()
     {
         if (isset($this->skippedTests[__FUNCTION__])) {
             $this->markTestSkipped($this->skippedTests[__FUNCTION__]);
@@ -150,7 +150,7 @@ trait EphemeralTagAwareTestTrait
             return $value;
         }));
         $item = $cache->getItem('foo');
-        $this->assertTrue($item->isHit(),"Invalidation happened before saving the item should not have impact on item's validity");
+        $this->assertTrue($item->isHit(), "Invalidation happened before saving the item should not have impact on item's validity");
         $this->assertSame($value, $item->get(), "Invalidation happened before saving the item should not have impact on item's validity");
 
         // ---
@@ -163,7 +163,7 @@ trait EphemeralTagAwareTestTrait
             return function () use ($value) { return $value.$value; };
         }));
         $item = $cache->getItem('foo');
-        $this->assertTrue($item->isHit(),"Invalidation happened before deferred computation should not have impact on item's validity");
+        $this->assertTrue($item->isHit(), "Invalidation happened before deferred computation should not have impact on item's validity");
         $this->assertSame($value.$value, $item->get(), "Invalidation happened before deferred computation should not have impact on item's validity");
 
         // ---
@@ -174,11 +174,12 @@ trait EphemeralTagAwareTestTrait
 
             return function () use ($value, $anotherCacheClient) {
                 $anotherCacheClient->invalidateTags(['tag2']); // emulate invalidation inside save()
+
                 return $value.$value.$value;
             };
         }));
         $item = $cache->getItem('foo');
-        $this->assertFalse($item->isHit(), "The item must be invalidated if invalidation happens during deferred computation");
-        $this->assertNull($item->get(), "The item must be invalidated if invalidation happens during deferred computation");
+        $this->assertFalse($item->isHit(), 'The item must be invalidated if invalidation happens during deferred computation');
+        $this->assertNull($item->get(), 'The item must be invalidated if invalidation happens during deferred computation');
     }
 }

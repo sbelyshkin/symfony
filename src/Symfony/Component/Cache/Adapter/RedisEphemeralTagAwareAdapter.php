@@ -121,22 +121,22 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
     protected function retrieveTagVersions(array $tags): array
     {
         $tagIds = $this->getTagIdsMap($tags);
-        \ksort($tagIds);
+        ksort($tagIds);
 
-        $results = $this->fetchRaw(\array_keys($tagIds));
+        $results = $this->fetchRaw(array_keys($tagIds));
 
         $tagVersions = [];
         foreach ($results as $id => $tagVersion) {
             $tagVersions[$tagIds[$id]] = $tagVersion;
         }
 
-        if (!$tagIds = \array_diff_key($tagIds, $results)) {
+        if (!$tagIds = array_diff_key($tagIds, $results)) {
             // If tags have TTL, update it from time to time
-            if ($this->tagsLifetime && \rand(0, static::DEFAULT_CACHE_TTL) < 60) {
+            if ($this->tagsLifetime && rand(0, static::DEFAULT_CACHE_TTL) < 60) {
                 // Since DEFAULT_CACHE_TTL is the minimal lifetime for tags, this formula means that
                 // if the tags are read on average more than 1 time per 60 seconds, then they have a good chance
                 // of infinite prolongation of their lives (not counting invalidations and evictions).
-                $this->refreshTagIds(\array_keys($results));
+                $this->refreshTagIds(array_keys($results));
             }
 
             return $tagVersions;
@@ -181,7 +181,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
             return;
         }
 
-        $startTime = \microtime(true);
+        $startTime = microtime(true);
 
         $results = $this->pipeline(static function () use ($tagIds) {
             foreach ($tagIds as $id) {
@@ -189,7 +189,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
                 yield 'pttl' => [$id];
             }
         });
-        $tagTtls = \array_combine($tagIds, array_map(function ($ttl) { return $ttl/1000; }, \iterator_to_array($results)));
+        $tagTtls = array_combine($tagIds, array_map(function ($ttl) { return $ttl / 1000; }, iterator_to_array($results)));
 
         $ttl = $this->tagsLifetime;
         $results = $this->pipeline(static function () use ($tagIds, $ttl) {
@@ -197,11 +197,11 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
                 yield 'expire' => [$id, $ttl];
             }
         });
-        $gone = \array_keys(\array_diff_key($tagTtls, \array_filter(\array_combine($tagIds, \iterator_to_array($results)))));
+        $gone = array_keys(array_diff_key($tagTtls, array_filter(array_combine($tagIds, iterator_to_array($results)))));
 
-        $time = \sprintf('%.3f', 1000 * (\microtime(true) - $startTime));
+        $time = sprintf('%.3f', 1000 * (microtime(true) - $startTime));
         $message = 'Some tags were lucky to get their TTL refreshed! Their names and TTLs are: "{tags}" but "{gone}" have suddenly gone and not been updated. New TTL is {ttl}s. Update took {utime}ms.';
-        CacheItem::log($this->logger, $message, ['tags' => \json_encode($tagTtls), 'gone' => \json_encode($gone), 'ttl' => $ttl, 'utime' => $time, 'cache-adapter' => \get_debug_type($this)]);
+        CacheItem::log($this->logger, $message, ['tags' => json_encode($tagTtls), 'gone' => json_encode($gone), 'ttl' => $ttl, 'utime' => $time, 'cache-adapter' => get_debug_type($this)]);
     }
 
     /**
@@ -219,22 +219,20 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
                     yield 'get' => [$id];
                 }
             });
-            $values = \iterator_to_array($values);
+            $values = iterator_to_array($values);
         } else {
-            $values = \array_combine($ids, $this->redis->mget($ids));
+            $values = array_combine($ids, $this->redis->mget($ids));
         }
 
-        return \array_filter($values, static function($v) { return \is_string($v); });
+        return array_filter($values, static function ($v) { return \is_string($v); });
     }
 
     /**
      * @param \Redis|\RedisArray|\RedisCluster|\Predis\ClientInterface $redisClient
-     * @param string                                                   $namespace
-     * @param int                                                      $defaultLifetime
      */
     private function init($redisClient, string $namespace, int $defaultLifetime)
     {
-        if (\preg_match('#[^-+_.A-Za-z0-9]#', $namespace, $match)) {
+        if (preg_match('#[^-+_.A-Za-z0-9]#', $namespace, $match)) {
             throw new InvalidArgumentException(sprintf('RedisAdapter namespace contains "%s" but only characters in [-+_.A-Za-z0-9] are allowed.', $match[0]));
         }
 
@@ -242,7 +240,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
             throw new InvalidArgumentException(sprintf('"%s()" expects parameter 1 to be Redis, RedisArray, RedisCluster or Predis\ClientInterface, "%s" given.', __METHOD__, get_debug_type($redisClient)));
         }
 
-        $this->tagsLifetime = 0 < $defaultLifetime ? \max(static::DEFAULT_CACHE_TTL / 3, $defaultLifetime) * 3 : 0;
+        $this->tagsLifetime = 0 < $defaultLifetime ? max(static::DEFAULT_CACHE_TTL / 3, $defaultLifetime) * 3 : 0;
         $this->namespace = '' === $namespace ? '' : $namespace.':';
 
         if ($this->tagsLifetime) {
