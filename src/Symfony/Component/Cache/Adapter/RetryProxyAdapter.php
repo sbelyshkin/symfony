@@ -11,7 +11,6 @@
 
 namespace Symfony\Component\Cache\Adapter;
 
-use Doctrine\ORM\Mapping as ORM;
 use Psr\Cache\CacheItemInterface;
 use Psr\Cache\CacheItemPoolInterface;
 use Psr\Log\LoggerAwareInterface;
@@ -24,13 +23,12 @@ use Symfony\Component\Cache\Traits\ProxyTrait;
 use Symfony\Contracts\Cache\CacheInterface;
 
 /**
- * Proxies calls to AdapterInterface::class or any other PSR-6 compliant adapter
- * retrying to get individual items if a getItem() call fails. Other calls, including getItems(),
- * are just forwarded to underlying adapter with no retries.
+ * Proxies calls to methods of AdapterInterface::class or any other PSR-6 compliant adapter
+ * and performs retries when getting of individual item fails. All other calls, including getItems(),
+ * are just forwarded to underlying adapter without retries.
  *
- * Calls to methods of CacheInterface::class are forwarded to underlying adapter if it implements the interface,
- * and if the ContractsTrait is used then the locks or other wrappers around callback function are disabled.
- * Otherwise, own implementation of CacheInterface is used to leverage retries.
+ * CacheInterface::class is completely implemented in the proxy adapter to leverage retries
+ * so no calls to its methods are forwarded.
  *
  * Allowed number of retries are distributed over the timeout interval according to chosen distribution strategy.
  *
@@ -44,6 +42,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     public const STRATEGY_FLAT_DISTRIBUTION_GEOMETRIC_INTERVALS = 3;
     public const STRATEGY_DELTA_DISTRIBUTION_EVEN_INTERVALS = 4;
     public const STRATEGY_FLAT_DISTRIBUTION_RANDOM_INTERVALS = 5;
+    public const STRATEGY_BINOMIAL_DISTRIBUTION_EVEN_INTERVALS = 6;
 
     use ContractsTrait;
     use ProxyTrait;
@@ -73,13 +72,8 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
      * @var \Closure
      */
     private $strategyMethod;
-    /**
-     * @var bool
-     */
-    private $isContractsTraitUsedByPool;
 
     /**
-     * RetryProxyAdapter constructor.
      *
      * @param AdapterInterface|CacheItemPoolInterface $pool Cache pool
      * @param int $timeout Maximum time to wait, in ms
@@ -95,14 +89,38 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
         $this->strategy = $strategy;
         $this->factor = $factor;
 
-        $this->setCallbackWrapper(null);
-        $this->isContractsTraitUsedByPool = $this->isContractsTraitUsedByPool();
+        $this->setCallbackWrapper(null); // Adapter needs to be free of locks by design
 
         $this->strategyMethod = [$this, 'noRetryStrategy'];
         if ($this->timeout < 1 || $this->maxNumberOfRetries < 0) {
-            CacheItem::log($this->logger, 'Wrong parameters, no retries will be performed');
+            CacheItem::log(
+                $this->logger,
+                'Wrong configuration of retries for "{adapter}": "{timeout}"/"{maxNumberOfRetries}"/"{strategy}", no retries will be performed',
+                ['adapter' => \get_debug_type($this->pool), 'timeout' => $this->timeout, 'maxNumberOfRetries' => $this->maxNumberOfRetries, 'strategy' => $this->strategy]
+            );
+        } elseif (0 === $this->maxNumberOfRetries) {
+            CacheItem::log($this->logger, 'Adapter was configured with zero retries for {adapter}', ['adapter' => \get_debug_type($this->pool)]);
         } elseif (self::STRATEGY_FLAT_DISTRIBUTION_GEOMETRIC_INTERVALS === $strategy) {
-            $this->strategyMethod = [$this, 'flatDistributionGeometricIntervalsStrategy'];
+            if ($this->factor > 0) {
+                $this->strategyMethod = [$this, 'flatDistributionGeometricIntervalsStrategy'];
+            } else {
+                $this->strategyMethod = [$this, 'noRetryStrategy'];
+                CacheItem::log(
+                    $this->logger,
+                    'Wrong parameter value "{factor}" for chosen strategy "{strategy}", no retries will be performed',
+                    ['factor' => $this->factor, 'strategy' => $this->strategy]
+                );
+            }
+        } elseif (self::STRATEGY_BINOMIAL_DISTRIBUTION_EVEN_INTERVALS === $strategy) {
+            if ($this->factor < 0 || $this->factor > 1 && $this->factor >= $this->maxNumberOfRetries) {
+                // factor <= 0 turns retries off, factor >= 1 leads to delta-distribution
+                CacheItem::log(
+                    $this->logger,
+                    'Parameter values "{factor}"/"{maxNumberOfRetries}" are out of the proper range for chosen strategy "{strategy}", please check',
+                    ['factor' => $this->factor, 'maxNumberOfRetries' => $this->maxNumberOfRetries, 'strategy' => $this->strategy]
+                );
+            }
+            $this->strategyMethod = [$this, 'binomialDistributionEvenIntervalsStrategy'];
         } elseif (self::STRATEGY_FLAT_DISTRIBUTION_EVEN_INTERVALS === $strategy) {
             $this->strategyMethod = [$this, 'flatDistributionEvenIntervalsStrategy'];
         } elseif (self::STRATEGY_NORMAL_DISTRIBUTION_RANDOM_INTERVALS === $strategy) {
@@ -112,8 +130,75 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
         } elseif (self::STRATEGY_FLAT_DISTRIBUTION_RANDOM_INTERVALS === $strategy) {
             $this->strategyMethod = [$this, 'flatDistributionRandomIntervalsStrategy'];
         } else {
-            CacheItem::log($this->logger, 'Unknown strategy "{strategy}", no retries will be performed', ['strategy' => $strategy]);
+            CacheItem::log($this->logger, 'Unknown strategy "{strategy}", no retries will be performed', ['strategy' => $this->strategy]);
         }
+    }
+    /**
+     * {@inheritdoc}
+     */
+    public function clear(string $prefix = '')
+    {
+        if ($this->pool instanceof AdapterInterface) {
+            return $this->pool->clear($prefix);
+        }
+
+        return $this->pool->clear();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function commit()
+    {
+        return $this->pool->commit();
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function deleteItem($key): bool
+    {
+        return $this->pool->deleteItem($key);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function deleteItems(array $keys): bool
+    {
+        return $this->pool->deleteItems($keys);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function hasItem($key)
+    {
+        return $this->pool->hasItem($key);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function save(CacheItemInterface $item)
+    {
+        return $this->pool->save($item);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function saveDeferred(CacheItemInterface $item): bool
+    {
+        return $this->pool->saveDeferred($item);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function get(string $key, callable $callback, float $beta = null, array &$metadata = null)
+    {
+        return $this->doGet($this, $key, $callback, $beta, $metadata);
     }
 
     /**
@@ -163,7 +248,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     private function flatDistributionGeometricIntervalsStrategy($key): CacheItemInterface
     {
         $item = $this->pool->getItem($key);
-        if ($item->isHit() || 0 === $this->maxNumberOfRetries) {
+        if ($item->isHit()) {
             return $item;
         }
 
@@ -172,7 +257,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
         $randomValueInterval = $timeStep = 1000 * $this->timeout / pow($base, $this->maxNumberOfRetries);
         $randomValue = rand(0, 1000 * $this->timeout - 1);
 
-        // Someone should fail immediately to go to compute the new value for others
+        // Someone should fail immediately to go to compute the new value for others awaiting it
         if ($randomValue < $randomValueInterval) {
             // 0 retries
             return $item;
@@ -182,10 +267,15 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
         $timeStep = $timeStep * ($base - 1) / $base;
         for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
             $timeStep *= $base;
-            if (0 && ($delta = (microtime(true) - $statTime) * 1000000 + $timeStep - $this->timeout * 1000) > 0) {
+            if (($delta = (microtime(true) - $statTime) * 1000000 + $timeStep - $this->timeout * 1000) > 0) {
                 // In order to meet the timeout we need to shrink the last interval
                 $timeStep -= $delta;
                 if ($timeStep < 0) {
+                    CacheItem::log(
+                        $this->logger,
+                        'Timeout is too small to perform all retries for {adapter}: "{timeout}"/"{maxNumberOfRetries}"/"{strategy}"',
+                        ['adapter' => \get_debug_type($this->pool), 'timeout' => $this->timeout, 'maxNumberOfRetries' => $this->maxNumberOfRetries, 'strategy' => $this->strategy]
+                    );
                     // Timeout is too small for performing all retries
                     break;
                 }
@@ -208,8 +298,8 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
      * Returns a hit as soon as it's retrieved, returns a miss after random number of retries.
      * Zero number of retries is possible to give a chance for earlier computation of a new value.
      *
-     * Probability of a miss at every retry and an interval between retries are constant.
-     * The distribution of misses is flat on average but not uniform.
+     * It's a discrete uniform distribution. Since the case with zero retries included,
+     * proportion of misses on every retry is 1 / (1 + maxNumberOfRetries).
      *
      * @param $key
      *
@@ -220,7 +310,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     private function flatDistributionEvenIntervalsStrategy($key): CacheItemInterface
     {
         $item = $this->pool->getItem($key);
-        if ($item->isHit() || 0 === $this->maxNumberOfRetries) {
+        if ($item->isHit()) {
             return $item;
         }
 
@@ -249,7 +339,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
 
     /**
      * Returns a hit as soon as it's retrieved, returns a miss after all retries are exceeded.
-     * Timeout is shrink randomly in a range from the initial value to a near zero.
+     * Timeout is shrink randomly from the initial value down to a near zero.
      *
      * @param $key
      *
@@ -260,12 +350,12 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     private function flatDistributionRandomIntervalsStrategy($key): CacheItemInterface
     {
         $item = $this->pool->getItem($key);
-        if ($item->isHit() || 0 === $this->maxNumberOfRetries) {
+        if ($item->isHit()) {
             return $item;
         }
 
         $statTime = microtime(true);
-        $timeout = rand(1, 1000 * $this->timeout); // flat distribution
+        $timeout = rand(1, 1000 * $this->timeout); // uniform distribution of misses within initial timeout interval
         $timeStep = ceil($timeout / $this->maxNumberOfRetries);
 
         for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
@@ -302,7 +392,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     private function normalDistributionRandomIntervalsStrategy($key): CacheItemInterface
     {
         $item = $this->pool->getItem($key);
-        if ($item->isHit() || 0 === $this->maxNumberOfRetries) {
+        if ($item->isHit()) {
             return $item;
         }
 
@@ -331,7 +421,8 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     /**
      * Returns a hit as soon as it's retrieved, returns a miss after all retries are exceeded.
      *
-     * This distribution is not suitable for stampede protection since it just postpones all misses for a timeout.
+     * This distribution is not suitable for cache stampede protection when get-computeIfAbsent-put pattern is used
+     * since it just postpones all misses and no single caller computes new value before expiration of the timeout.
      *
      * @param $key
      *
@@ -342,7 +433,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     private function deltaDistributionEvenIntervalsStrategy($key): CacheItemInterface
     {
         $item = $this->pool->getItem($key);
-        if ($item->isHit() || 0 === $this->maxNumberOfRetries) {
+        if ($item->isHit()) {
             return $item;
         }
 
@@ -369,114 +460,88 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     }
 
     /**
-     * {@inheritdoc}
+     * Returns a hit as soon as it's retrieved, returns a miss after random number of retries.
+     * Zero number of retries is possible to give a chance for earlier computation of a new value.
+     *
+     * Time intervals between retries are equal as well as the probability of each retry.
+     *
+     * @param $key
+     *
+     * @return CacheItemInterface
+     *
+     * @throws \Psr\Cache\InvalidArgumentException
      */
-    public function hasItem($key)
+    private function binomialDistributionEvenIntervalsStrategy($key): CacheItemInterface
     {
-        return $this->pool->hasItem($key);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function clear(string $prefix = '')
-    {
-        if ($this->pool instanceof AdapterInterface) {
-            return $this->pool->clear($prefix);
+        $item = $this->pool->getItem($key);
+        if ($item->isHit()) {
+            return $item;
         }
 
-        return $this->pool->clear();
-    }
+        $statTime = microtime(true);
+        $timeStep = 1000 * $this->timeout / $this->maxNumberOfRetries;
 
-    /**
-     * {@inheritdoc}
-     */
-    public function deleteItem($key): bool
-    {
-        return $this->pool->deleteItem($key);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function deleteItems(array $keys): bool
-    {
-        return $this->pool->deleteItems($keys);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function save(CacheItemInterface $item)
-    {
-        return $this->pool->save($item);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function saveDeferred(CacheItemInterface $item): bool
-    {
-        return $this->pool->saveDeferred($item);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function commit()
-    {
-        return $this->pool->commit();
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function get(string $key, callable $callback, float $beta = null, array &$metadata = null)
-    {
-//        if ($this->isContractsTraitUsedByPool) {
-//            $wrapper = $this->pool->setCallbackWrapper(null);
-//            $result = $this->pool->get($key, $callback, $beta, $metadata);
-//            $this->pool->setCallbackWrapper($wrapper);
-//
-//            return $result;
-//        }
-
-//        if ($this->pool instanceof CacheInterface) {
-//            return $this->pool->get($key, $callback, $beta, $metadata);
-//        }
-
-        return $this->doGet($this, $key, $callback, $beta, $metadata);
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function delete(string $key): bool
-    {
-//        if ($this->pool instanceof CacheInterface) {
-//            return $this->pool->delete($key);
-//        }
-
-        return $this->pool->deleteItem($key);
-    }
-
-    private function isContractsTraitUsedByPool(): bool
-    {
-        if (!$this->pool instanceof CacheInterface) {
-            return false;
+        if ($this->factor < 0) {
+            $probabilityOfEachRetry = 0;
+        } elseif ($this->factor < 1) {
+            $probabilityOfEachRetry = $this->factor;
+        } elseif($this->factor < $this->maxNumberOfRetries) {
+            // The factor here is the expected number of successes in a sequence of N tries,
+            $probabilityOfEachRetry = $this->factor / $this->maxNumberOfRetries;
+        } else {
+            $probabilityOfEachRetry = 1;
         }
 
-        if (\array_key_exists(ContractsTrait::class, \class_uses($this->pool))) {
-            return true;
-        }
+//        $numberOfRetries = 0;
+//        for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
+//            if (($rand = rand(1, 1 << 20)) <= ($fact = $probabilityOfNextRetry * (1 << 20))) {
+//                $numberOfRetries++;
+//            }
+//        }
 
-        foreach (\class_parents($this->pool) as $parentClass) {
-            if (\array_key_exists(ContractsTrait::class, \class_uses($parentClass))) {
-                return true;
+        $numberOfRetries = $this->maxNumberOfRetries;
+        for ($r = 0; $r < $numberOfRetries; $r++) {
+            // Probability is in the range [0; 1], 0 means never, 1 means always
+            if (($probability = $probabilityOfEachRetry * (1 << 20)) < ($rand = rand(1, 1 << 20))) {
+                continue;
+            }
+            $timeStep = $this->getAdjustedTimeInterval($timeStep, $statTime);
+            if ($timeStep < 0) {
+                break;
+            }
+            usleep($timeStep);
+            $item = $this->pool->getItem($key);
+            if ($item->isHit()) {
+                return $item;
             }
         }
 
-        return false;
+        return $item;
     }
 
+    /**
+     * Adjusts (shrinks) time interval if it doesn't comply with overall time limit.
+     * If returned interval is negative then the timeout has already been exceeded and caller should stop retrying.
+     *
+     * @param float $nextTimeInterval Time interval in microseconds
+     * @param float $startTime  Timestamp
+     * @return float Adjusted time interval in microseconds
+     */
+    private function getAdjustedTimeInterval(float $nextTimeInterval, float $startTime): float
+    {
+        $delta = (microtime(true) - $startTime) * 1000000 + $nextTimeInterval - $this->timeout * 1000;
+        if ($delta > 0) {
+            // In order to meet the timeout we need to shrink next (most likely the last) interval
+            $nextTimeInterval -= $delta;
+            if ($nextTimeInterval < 0) {
+                CacheItem::log(
+                    $this->logger,
+                    'Timeout is too small to perform all retries for "{adapter}": "{timeout}"/"{maxNumberOfRetries}"/"{strategy}"',
+                    ['adapter' => \get_debug_type($this->pool), 'timeout' => $this->timeout, 'maxNumberOfRetries' => $this->maxNumberOfRetries, 'strategy' => $this->strategy]
+                );
+            }
+        }
+
+        return $nextTimeInterval;
+    }
 }
