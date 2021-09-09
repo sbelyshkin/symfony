@@ -6,6 +6,8 @@ CHANGELOG
 
  * Make `LockRegistry` use semaphores when possible
  * Deprecate `DoctrineProvider` and `DoctrineAdapter` because these classes have been added to the `doctrine/cache` package
+ * Added new family of Ephemeral Tag Aware Adapters which supports volatile storages
+ * Added RetryProxyAdapter which can be used for mitigating cache stampedes with no locking
 
 5.3
 ---
