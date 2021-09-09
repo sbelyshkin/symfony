@@ -189,7 +189,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
                 yield 'pttl' => [$id];
             }
         });
-        $tagTtls = \array_combine($tagIds, \iterator_to_array($results));
+        $tagTtls = \array_combine($tagIds, array_map(function ($ttl) { return $ttl/1000; }, \iterator_to_array($results)));
 
         $ttl = $this->tagsLifetime;
         $results = $this->pipeline(static function () use ($tagIds, $ttl) {
@@ -199,8 +199,8 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
         });
         $gone = \array_keys(\array_diff_key($tagTtls, \array_filter(\array_combine($tagIds, \iterator_to_array($results)))));
 
-        $time = \sprintf('%.6f',1000 * (\microtime(true) - $startTime));
-        $message = 'Some tags were lucky to get their TTL refreshed! Their names and TTLs in ms are: "{tags}" but "{gone}" have suddenly gone. New TTL is {ttl}s. Update took {utime}ms.';
+        $time = \sprintf('%.3f', 1000 * (\microtime(true) - $startTime));
+        $message = 'Some tags were lucky to get their TTL refreshed! Their names and TTLs are: "{tags}" but "{gone}" have suddenly gone and not been updated. New TTL is {ttl}s. Update took {utime}ms.';
         CacheItem::log($this->logger, $message, ['tags' => \json_encode($tagTtls), 'gone' => \json_encode($gone), 'ttl' => $ttl, 'utime' => $time, 'cache-adapter' => \get_debug_type($this)]);
     }
 
