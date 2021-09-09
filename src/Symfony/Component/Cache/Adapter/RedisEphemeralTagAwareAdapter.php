@@ -83,7 +83,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      * it's good to pass planned maximum TTL as a default lifetime to give the Adapter a hint on TTL value for tags.
      *
      * @param \Redis|\RedisArray|\RedisCluster|\Predis\ClientInterface $redisClient     The redis client
-     * @param CacheItemPoolInterface|null                              $itemPool        The cache pool for items
+     * @param CacheItemPoolInterface|null                              $itemPool        A separate pre-configured cache pool for items (if provided)
      * @param string                                                   $namespace       The namespace for tags (and for items if item pool is not provided)
      * @param int                                                      $defaultLifetime The default lifetime for items (expected maximal)
      * @param MarshallerInterface|null                                 $marshaller      The marshaller for items
