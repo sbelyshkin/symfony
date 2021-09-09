@@ -24,7 +24,7 @@ use Symfony\Contracts\Cache\CacheInterface;
 
 /**
  * Proxies calls to methods of AdapterInterface::class or any other PSR-6 compliant adapter
- * and performs retries when getting of individual item fails. All other calls, including getItems(),
+ * and performs retries when getting of individual items fails. All other calls, including getItems(),
  * are just forwarded to underlying adapter without retries.
  *
  * CacheInterface::class is completely implemented in the proxy adapter to leverage retries
@@ -252,7 +252,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
             return $item;
         }
 
-        $statTime = microtime(true);
+        $startTime = microtime(true);
         $base = $this->factor; // aka common ratio
         $randomValueInterval = $timeStep = 1000 * $this->timeout / pow($base, $this->maxNumberOfRetries);
         $randomValue = rand(0, 1000 * $this->timeout - 1);
@@ -267,18 +267,9 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
         $timeStep = $timeStep * ($base - 1) / $base;
         for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
             $timeStep *= $base;
-            if (($delta = (microtime(true) - $statTime) * 1000000 + $timeStep - $this->timeout * 1000) > 0) {
-                // In order to meet the timeout we need to shrink the last interval
-                $timeStep -= $delta;
-                if ($timeStep < 0) {
-                    CacheItem::log(
-                        $this->logger,
-                        'Timeout is too small to perform all retries for {adapter}: "{timeout}"/"{maxNumberOfRetries}"/"{strategy}"',
-                        ['adapter' => \get_debug_type($this->pool), 'timeout' => $this->timeout, 'maxNumberOfRetries' => $this->maxNumberOfRetries, 'strategy' => $this->strategy]
-                    );
-                    // Timeout is too small for performing all retries
-                    break;
-                }
+            $timeStep = $this->getAdjustedTimeInterval($timeStep, $startTime);
+            if ($timeStep < 0) {
+                break;
             }
             usleep($timeStep);
             $item = $this->pool->getItem($key);
@@ -314,18 +305,14 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
             return $item;
         }
 
-        $statTime = microtime(true);
+        $startTime = microtime(true);
         $timeStep = 1000 * $this->timeout / $this->maxNumberOfRetries;
         $numberOfSteps = rand(0, $this->maxNumberOfRetries); // zero included
 
         for ($r = 0; $r < $numberOfSteps; $r++) {
-            if (($delta = (microtime(true) - $statTime) * 1000000 + $timeStep - $this->timeout * 1000) > 0) {
-                // In order to meet the timeout we need to shrink the last interval
-                $timeStep -= $delta;
-                if ($timeStep < 0) {
-                    // Timeout is too small for performing all retries
-                    break;
-                }
+            $timeStep = $this->getAdjustedTimeInterval($timeStep, $startTime);
+            if ($timeStep < 0) {
+                break;
             }
             usleep($timeStep);
             $item = $this->pool->getItem($key);
@@ -354,18 +341,14 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
             return $item;
         }
 
-        $statTime = microtime(true);
+        $startTime = microtime(true);
         $timeout = rand(1, 1000 * $this->timeout); // uniform distribution of misses within initial timeout interval
         $timeStep = ceil($timeout / $this->maxNumberOfRetries);
 
         for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
-            if (($delta = (microtime(true) - $statTime) * 1000000 + $timeStep - $this->timeout * 1000) > 0) {
-                // In order to meet the timeout we need to shrink the last interval
-                $timeStep -= $delta;
-                if ($timeStep < 0) {
-                    // Timeout is too small for performing all retries
-                    break;
-                }
+            $timeStep = $this->getAdjustedTimeInterval($timeStep, $startTime);
+            if ($timeStep < 0) {
+                break;
             }
             usleep($timeStep);
             $item = $this->pool->getItem($key);
@@ -396,17 +379,13 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
             return $item;
         }
 
-        $statTime = microtime(true);
+        $startTime = microtime(true);
 
         for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
             $timeStep = rand(1, 1000 * $this->timeout / $this->maxNumberOfRetries);
-            if (($delta = (microtime(true) - $statTime) * 1000000 + $timeStep - $this->timeout * 1000) > 0) {
-                // In order to meet the timeout we need to shrink the last interval
-                $timeStep -= $delta;
-                if ($timeStep < 0) {
-                    // Timeout is too small for performing all retries
-                    break;
-                }
+            $timeStep = $this->getAdjustedTimeInterval($timeStep, $startTime);
+            if ($timeStep < 0) {
+                break;
             }
             usleep($timeStep);
             $item = $this->pool->getItem($key);
@@ -437,17 +416,13 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
             return $item;
         }
 
-        $statTime = microtime(true);
+        $startTime = microtime(true);
         $timeStep = 1000 * $this->timeout / $this->maxNumberOfRetries;
 
         for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
-            if (($delta = (microtime(true) - $statTime) * 1000000 + $timeStep - $this->timeout * 1000) > 0) {
-                // In order to meet the timeout we need to shrink the last interval
-                $timeStep -= $delta;
-                if ($timeStep < 0) {
-                    // Timeout is too small for performing all retries
-                    break;
-                }
+            $timeStep = $this->getAdjustedTimeInterval($timeStep, $startTime);
+            if ($timeStep < 0) {
+                break;
             }
             usleep($timeStep);
             $item = $this->pool->getItem($key);
@@ -478,7 +453,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
             return $item;
         }
 
-        $statTime = microtime(true);
+        $startTime = microtime(true);
         $timeStep = 1000 * $this->timeout / $this->maxNumberOfRetries;
 
         if ($this->factor < 0) {
@@ -492,20 +467,13 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
             $probabilityOfEachRetry = 1;
         }
 
-//        $numberOfRetries = 0;
-//        for ($r = 0; $r < $this->maxNumberOfRetries; $r++) {
-//            if (($rand = rand(1, 1 << 20)) <= ($fact = $probabilityOfNextRetry * (1 << 20))) {
-//                $numberOfRetries++;
-//            }
-//        }
-
         $numberOfRetries = $this->maxNumberOfRetries;
         for ($r = 0; $r < $numberOfRetries; $r++) {
             // Probability is in the range [0; 1], 0 means never, 1 means always
-            if (($probability = $probabilityOfEachRetry * (1 << 20)) < ($rand = rand(1, 1 << 20))) {
+            if (($probabilityOfEachRetry * (1 << 20)) < (rand(1, 1 << 20))) {
                 continue;
             }
-            $timeStep = $this->getAdjustedTimeInterval($timeStep, $statTime);
+            $timeStep = $this->getAdjustedTimeInterval($timeStep, $startTime);
             if ($timeStep < 0) {
                 break;
             }
