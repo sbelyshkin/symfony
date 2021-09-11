@@ -81,9 +81,9 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
      * @param int                                     $timeout            Maximum time to wait, in ms
      * @param int                                     $maxNumberOfRetries Maximum number of retries
      * @param int                                     $strategy           Distribution strategy
-     * @param float                                   $factor             Optional parameter for selected strategy
+     * @param float|null                              $factor             Optional parameter for selected strategy
      */
-    public function __construct(CacheItemPoolInterface $pool, int $timeout = 5000, int $maxNumberOfRetries = 4, int $strategy = self::STRATEGY_DEFAULT, float $factor = 3)
+    public function __construct(CacheItemPoolInterface $pool, int $timeout = 10000, int $maxNumberOfRetries = 4, int $strategy = self::STRATEGY_DEFAULT, float $factor = null)
     {
         $this->pool = $pool;
         $this->timeout = $timeout;
@@ -101,9 +101,9 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
                 ['adapter' => get_debug_type($this->pool), 'timeout' => $this->timeout, 'maxNumberOfRetries' => $this->maxNumberOfRetries, 'strategy' => $this->strategy]
             );
         } elseif (0 === $this->maxNumberOfRetries) {
-            CacheItem::log($this->logger, 'Adapter was configured with zero retries for {adapter}', ['adapter' => get_debug_type($this->pool)]);
+            CacheItem::log($this->logger, 'Adapter was configured with zero retries for "{adapter}"', ['adapter' => get_debug_type($this->pool)]);
         } elseif (self::STRATEGY_FLAT_DISTRIBUTION_GEOMETRIC_INTERVALS === $strategy) {
-            if ($this->factor > 0) {
+            if (null === $this->factor || $this->factor > 0) {
                 $this->strategyMethod = [$this, 'flatDistributionGeometricIntervalsStrategy'];
             } else {
                 $this->strategyMethod = [$this, 'noRetryStrategy'];
@@ -114,7 +114,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
                 );
             }
         } elseif (self::STRATEGY_BINOMIAL_DISTRIBUTION_EVEN_INTERVALS === $strategy) {
-            if ($this->factor < 0 || $this->factor > 1 && $this->factor >= $this->maxNumberOfRetries) {
+            if (null !== $this->factor && ($this->factor < 0 || $this->factor > 1 && $this->factor >= $this->maxNumberOfRetries)) {
                 // factor <= 0 turns retries off, factor >= 1 leads to delta-distribution
                 CacheItem::log(
                     $this->logger,
@@ -252,7 +252,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
         }
 
         $startTime = microtime(true);
-        $base = $this->factor; // aka common ratio
+        $base = $this->factor ?? 3; // aka common ratio
         $randomValueInterval = $timeStep = 1000 * $this->timeout / $base ** $this->maxNumberOfRetries;
         $randomValue = rand(0, 1000 * $this->timeout - 1);
 
@@ -450,7 +450,9 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
         $startTime = microtime(true);
         $timeStep = 1000 * $this->timeout / $this->maxNumberOfRetries;
 
-        if ($this->factor < 0) {
+        if (null === $this->factor) {
+            $probabilityOfEachRetry = 0.5;
+        } elseif ($this->factor < 0) {
             $probabilityOfEachRetry = 0;
         } elseif ($this->factor < 1) {
             $probabilityOfEachRetry = $this->factor;
