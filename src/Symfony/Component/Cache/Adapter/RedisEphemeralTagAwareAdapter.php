@@ -148,7 +148,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
 
         foreach ($results as $id => $result) {
             // SET NX results
-            if (true !== $result && (!$result instanceof Status || Status::get('OK') !== $result)) {
+            if (true !== $result && 1 !== $result && (!$result instanceof Status || Status::get('OK') !== $result)) {
                 continue;
             }
             // Return only known tag versions
