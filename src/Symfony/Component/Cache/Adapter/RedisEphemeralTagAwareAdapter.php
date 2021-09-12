@@ -32,6 +32,8 @@ use Symfony\Component\Cache\Traits\RedisTrait;
  * It's not the case when all reads and writes go to a master node(s). Adapter doesn't change the source for reads,
  * it's your responsibility to configure redis client according to your needs.
  *
+ * Hint: RetryProxyAdapter::class can help to mitigate mentioned replication lag issues as well as cache stampedes.
+ *
  * @requires Redis 2.6.12+
  *
  * @author Sergey Belyshkin <sbelyshkin@gmail.com>

@@ -37,7 +37,7 @@ use Symfony\Contracts\Cache\CacheInterface;
  *
  * @author Sergey Belyshkin <sbelyshkin@gmail.com>
  */
-class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAwareInterface, PruneableInterface, ResettableInterface
+class RetryProxyAdapter implements TagAwareAdapterInterface, CacheInterface, LoggerAwareInterface, PruneableInterface, ResettableInterface
 {
     use ContractsTrait;
     use LoggerAwareTrait;
@@ -139,6 +139,18 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     /**
      * {@inheritdoc}
      */
+    public function invalidateTags(array $tags)
+    {
+        if ($this->pool instanceof TagAwareAdapterInterface) {
+            return $this->pool->invalidateTags($tags);
+        }
+
+        return false;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function clear(string $prefix = '')
     {
         if ($this->pool instanceof AdapterInterface) {
@@ -151,7 +163,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     /**
      * {@inheritdoc}
      */
-    public function commit()
+    public function commit(): bool
     {
         return $this->pool->commit();
     }
@@ -175,7 +187,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     /**
      * {@inheritdoc}
      */
-    public function hasItem($key)
+    public function hasItem($key): bool
     {
         return $this->pool->hasItem($key);
     }
@@ -183,7 +195,7 @@ class RetryProxyAdapter implements AdapterInterface, CacheInterface, LoggerAware
     /**
      * {@inheritdoc}
      */
-    public function save(CacheItemInterface $item)
+    public function save(CacheItemInterface $item): bool
     {
         return $this->pool->save($item);
     }
