@@ -20,13 +20,16 @@ use Symfony\Component\Cache\CacheItem;
  */
 trait EphemeralTagAwareTestTrait
 {
-    public function testOptimisticConcurrencyControl()
+    /**
+     * @dataProvider provideDefaultLifetime
+     */
+    public function testOptimisticConcurrencyControl($defaultLifetime)
     {
         if (isset($this->skippedTests[__FUNCTION__])) {
             $this->markTestSkipped($this->skippedTests[__FUNCTION__]);
         }
 
-        $cache = $this->createCachePool(0, __FUNCTION__);
+        $cache = $this->createCachePool($defaultLifetime, __FUNCTION__);
         $anotherCacheClient = clone $cache;
         $value = mt_rand();
 
@@ -71,5 +74,10 @@ trait EphemeralTagAwareTestTrait
         $item = $cache->getItem('foo');
         $this->assertFalse($item->isHit(), 'The item must be invalidated if invalidation happens during deferred computation');
         $this->assertNull($item->get(), 'The item must be invalidated if invalidation happens during deferred computation');
+    }
+
+    function provideDefaultLifetime()
+    {
+        return [[0], [1000]];
     }
 }
