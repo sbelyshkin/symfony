@@ -111,6 +111,17 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     /**
      * {@inheritdoc}
      */
+    public function getItem($key): CacheItem
+    {
+        // Force retrieving the tags
+        $this->clearLastRetrievedTagVersions();
+
+        return parent::getItem($key);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     public function getItems(array $keys = []): array
     {
         // Force retrieving the tags

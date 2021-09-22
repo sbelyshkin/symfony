@@ -145,11 +145,35 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function getItem($key): CacheItem
     {
-        foreach ($this->getItems([$key]) as $item) {
-            return $item;
+        $prefixedKey = $this->getPrefixedKey($key);
+
+        if (isset($this->deferred[$key])) {
+            $this->commit();
         }
 
-        return $this->createCacheItem($key);
+        $item = $this->pool->getItem($prefixedKey);
+        if (!$item->isHit()) {
+            return $this->createCacheItem($key);
+        }
+
+        $itemData = $this->unpackItem($item);
+
+        if (!$itemData) {
+            return $this->createCacheItem($key);
+        }
+
+        // Even if cache storage tracks item's TTL, the item may be expired because of time discrepancy
+        if (isset($itemData['meta'][CacheItem::METADATA_EXPIRY]) && $itemData['meta'][CacheItem::METADATA_EXPIRY] < microtime(true)) {
+            return $this->createCacheItem($key);
+        }
+
+        $tagVersions = $this->getTagVersions(array_keys($itemData['tagVersions']));
+
+        if (!$this->isTagVersionsValid($itemData['tagVersions'], $tagVersions)) {
+            return $this->createCacheItem($key);
+        }
+
+        return $this->createCacheItem($key, true, $itemData['value'], $itemData['meta']);
     }
 
     /**
@@ -362,7 +386,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
     /**
      * Unpacks an item retrieved from the item pool.
      *
-     * @return array{value: mixed, tagVersions: array, meta: array}
+     * @return array{value: mixed, tagVersions: array, meta: array}|array{} An empty array if data structure invalid and/or cannot be unpacked
      */
     abstract protected function unpackItem(CacheItemInterface $item): array;
 
