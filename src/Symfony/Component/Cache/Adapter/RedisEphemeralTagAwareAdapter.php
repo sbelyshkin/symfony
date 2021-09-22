@@ -102,7 +102,12 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
      */
     public function invalidateTags(array $tags): bool
     {
+        foreach ($tags as $tag) {
+            CacheItem::validateKey($tag);
+        }
+
         parent::clearLastRetrievedTagVersions();
+
         $tagIdsMap = $this->getTagIdsMap($tags);
 
         return $this->doDelete(array_keys($tagIdsMap));

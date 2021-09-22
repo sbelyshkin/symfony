@@ -127,6 +127,8 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function hasItem($key): bool
     {
+        CacheItem::validateKey($key);
+
         if (isset($this->deferred[$key])) {
             $this->commit();
         }
@@ -185,12 +187,13 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             return [];
         }
 
+        $prefixedKeys = array_map([$this, 'getPrefixedKey'], $keys);
+        $itemIdsMap = array_combine($prefixedKeys, $keys);
+
         if ($this->deferred && array_intersect_key($this->deferred, array_flip($keys))) {
             $this->commit();
         }
 
-        $prefixedKeys = array_map([$this, 'getPrefixedKey'], $keys);
-        $itemIdsMap = array_combine($prefixedKeys, $keys);
         $items = $tags = [];
         foreach ($this->pool->getItems($prefixedKeys) as $itemId => $item) {
             $key = $itemIdsMap[$itemId];
@@ -320,6 +323,10 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function invalidateTags(array $tags): bool
     {
+        foreach ($tags as $tag) {
+            CacheItem::validateKey($tag);
+        }
+
         $tagIdsMap = $this->getTagIdsMap($tags);
 
         return $this->tagPool->deleteItems(array_keys($tagIdsMap));
@@ -447,6 +454,8 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     protected function getPrefixedKey($key): string
     {
+        CacheItem::validateKey($key);
+
         return static::ITEM_PREFIX.$key;
     }
 
