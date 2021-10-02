@@ -33,10 +33,6 @@ use Symfony\Component\Cache\CacheItem;
 class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
 {
     /**
-     * @var string
-     */
-    protected $instanceId = '';
-    /**
      * @var string[]
      */
     private $lastRetrievedTagVersions = [];
@@ -49,7 +45,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     {
         parent::__construct($itemPool, $tagPool);
         $this->setCallbackWrapper(null);
-        $this->instanceId = pack('N', crc32(getmypid().'@'.gethostname()));
 
         $getPrefixedKeyMethod = \Closure::fromCallable([$this, 'getPrefixedKey']);
         $this->computeAndPackItems = \Closure::bind(
@@ -259,11 +254,12 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     }
 
     /**
-     * Generates unique string for robust tag versioning.
+     * {@inheritDoc}
      */
     protected function generateTagVersion(): string
     {
-        // Add an instance ID to preclude the possibility of ABA problem
-        return pack('N', mt_rand()).$this->instanceId;
+        $tod = gettimeofday();
+
+        return pack('NN', mt_rand(\PHP_INT_MIN, \PHP_INT_MAX), ($tod['sec'] << 10) | intdiv($tod['usec'] << 10, 1000000));
     }
 }

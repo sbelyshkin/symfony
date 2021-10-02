@@ -429,14 +429,14 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
         $tagIds = $this->getTagIdsMap($tags);
         ksort($tagIds);
 
-        // Use of one stamp for many tags is good; when they are stored together, igbinary has 'compact_string' option for them
-        $newTagVersion = $this->generateTagVersion();
         $tagVersions = $generated = [];
         foreach ($this->tagPool->getItems(array_keys($tagIds)) as $tagId => $version) {
             if ($version->isHit() && is_scalar($tagVersion = $version->get())) {
                 $tagVersions[$tagIds[$tagId]] = $tagVersion;
                 continue;
             }
+            // Use of one stamp for many tags is good; when they are stored together, igbinary has 'compact_string' option for them
+            $newTagVersion ?? $newTagVersion = $this->generateTagVersion();
             $version->set($newTagVersion);
             $this->tagPool->saveDeferred($version);
             $generated[$tagIds[$tagId]] = $newTagVersion;
