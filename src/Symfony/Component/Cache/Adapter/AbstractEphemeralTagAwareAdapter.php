@@ -108,8 +108,9 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function prune()
     {
-        $this->pool instanceof PruneableInterface && $this->pool->prune();
-        $this->tagPool instanceof PruneableInterface && $this->tagPool->prune();
+        $isPruned = $this->pool instanceof PruneableInterface && $this->pool->prune();
+
+        return $this->tagPool instanceof PruneableInterface && $this->tagPool->prune() && $isPruned;
     }
 
     /**
@@ -421,8 +422,6 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      * May return only a part of requested tags or even none of them if for some reason they cannot be read or created.
      *
      * @throws \Psr\Cache\InvalidArgumentException
-     *
-     * @return string[]
      */
     protected function retrieveTagVersions(array $tags): array
     {
@@ -431,8 +430,8 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
 
         $tagVersions = $generated = [];
         foreach ($this->tagPool->getItems(array_keys($tagIds)) as $tagId => $version) {
-            if ($version->isHit() && is_scalar($tagVersion = $version->get())) {
-                $tagVersions[$tagIds[$tagId]] = $tagVersion;
+            if ($version->isHit()) {
+                $tagVersions[$tagIds[$tagId]] = $version->get();
                 continue;
             }
             // Use of one stamp for many tags is good; when they are stored together, igbinary has 'compact_string' option for them
@@ -478,8 +477,10 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
 
     /**
      * Generates unique string for robust tag versioning.
+     *
+     * @return mixed
      */
-    abstract protected function generateTagVersion(): string;
+    abstract protected function generateTagVersion();
 
     /**
      * Checks a set of tag versions against available current ones.

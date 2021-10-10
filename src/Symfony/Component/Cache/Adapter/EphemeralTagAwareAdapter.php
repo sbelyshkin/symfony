@@ -117,7 +117,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     /**
      * {@inheritdoc}
      */
-    public function getItems(array $keys = []): array
+    public function getItems(array $keys = [])
     {
         // Force retrieving the tags
         $this->clearLastRetrievedTagVersions();
@@ -172,7 +172,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     protected function isPackedValueStructureValid($value): bool
     {
         return \is_array($value) && ((['$'] === ($keys = array_keys($value)))
-                || ((['$', '#'] === $keys || ['$', '#', '^'] === $keys && \is_string($value['^'])) && \is_array($value['#'])));
+                || ((['$', '#'] === $keys || ['$', '#', '^'] === $keys) && \is_array($value['#'])));
     }
 
     /**
@@ -256,7 +256,7 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     /**
      * {@inheritDoc}
      */
-    protected function generateTagVersion(): string
+    protected function generateTagVersion()
     {
         $tod = gettimeofday();
 

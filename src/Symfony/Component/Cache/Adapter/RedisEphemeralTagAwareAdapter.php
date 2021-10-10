@@ -74,7 +74,7 @@ class RedisEphemeralTagAwareAdapter extends EphemeralTagAwareAdapter implements 
     /**
      * Strategy which creates Generator of SET NX instructions for specific redis client.
      *
-     * @var Closure
+     * @var \Closure
      */
     private $setNxGenerator;
 
