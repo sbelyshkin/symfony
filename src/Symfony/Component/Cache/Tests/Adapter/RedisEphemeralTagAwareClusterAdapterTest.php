@@ -20,8 +20,8 @@ use Symfony\Component\Cache\Traits\RedisClusterProxy;
  */
 class RedisEphemeralTagAwareClusterAdapterTest extends RedisClusterAdapterTest
 {
-    use TagAwareTestTrait;
     use EphemeralTagAwareTestTrait;
+    use TagAwareTestTrait;
 
     protected function setUp(): void
     {

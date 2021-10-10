@@ -76,7 +76,7 @@ trait EphemeralTagAwareTestTrait
         $this->assertNull($item->get(), 'The item must be invalidated if invalidation happens during deferred computation');
     }
 
-    function provideDefaultLifetime()
+    public function provideDefaultLifetime()
     {
         return [[0], [1000]];
     }

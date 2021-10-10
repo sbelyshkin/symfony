@@ -19,8 +19,8 @@ use Symfony\Component\Cache\Adapter\RedisEphemeralTagAwareAdapter;
  */
 class PredisEphemeralTagAwareClusterAdapterTest extends PredisClusterAdapterTest
 {
-    use TagAwareTestTrait;
     use EphemeralTagAwareTestTrait;
+    use TagAwareTestTrait;
 
     protected function setUp(): void
     {
