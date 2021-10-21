@@ -184,19 +184,19 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     public function getItems(array $keys = [])
     {
-        if (!$keys) {
-            return [];
+        $itemIdsMap = $tagVersions = $items = [];
+        $commit = false;
+
+        foreach ($keys as $key) {
+            $itemIdsMap[$this->getPrefixedKey($key)] = $key;
+            $commit = $commit || isset($this->deferred[$key]);
         }
 
-        $prefixedKeys = array_map([$this, 'getPrefixedKey'], $keys);
-        $itemIdsMap = array_combine($prefixedKeys, $keys);
-
-        if ($this->deferred && array_intersect_key($this->deferred, array_flip($keys))) {
+        if ($commit) {
             $this->commit();
         }
 
-        $items = $tags = [];
-        foreach ($this->pool->getItems($prefixedKeys) as $itemId => $item) {
+        foreach ($this->pool->getItems(array_keys($itemIdsMap)) as $itemId => $item) {
             $key = $itemIdsMap[$itemId];
             if (!$item->isHit()) {
                 $items[$key] = null;
@@ -216,29 +216,27 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
                 continue;
             }
 
-            $tags += $itemData['tagVersions'];
+            $tagVersions += $itemData['tagVersions'];
             $items[$key] = $itemData;
         }
 
-        $prefixedKeys = $itemIdsMap = null;
+        $itemIdsMap = null;
 
-        $tagVersions = $this->getTagVersions(array_keys($tags));
+        $tagVersions = $this->getTagVersions(array_keys($tagVersions));
 
         foreach ($items as $key => $itemData) {
             if (null === $itemData) {
-                $items[$key] = $this->createCacheItem($key);
+                yield $key => $this->createCacheItem($key);
                 continue;
             }
 
             if (!$this->isTagVersionsValid($itemData['tagVersions'], $tagVersions)) {
-                $items[$key] = $this->createCacheItem($key);
+                yield $key => $this->createCacheItem($key);
                 continue;
             }
 
-            $items[$key] = $this->createCacheItem($key, true, $itemData['value'], $itemData['meta']);
+            yield $key => $this->createCacheItem($key, true, $itemData['value'], $itemData['meta']);
         }
-
-        return $items;
     }
 
     protected function createCacheItem(string $key, bool $isHit = false, $value = null, array $metadata = []): CacheItem
