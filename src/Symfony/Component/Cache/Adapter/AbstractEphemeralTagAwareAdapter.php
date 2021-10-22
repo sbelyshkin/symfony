@@ -490,9 +490,16 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      */
     private function isTagVersionsValid(array $itemTagVersions, array $tagVersions): bool
     {
-        ksort($itemTagVersions);
-        ksort($tagVersions);
+        if (!$itemTagVersions) {
+            return true;
+        }
 
-        return $itemTagVersions === array_intersect_key($tagVersions, $itemTagVersions);
+        foreach ($itemTagVersions as $itemTag => $itemTagVersion) {
+            if (!isset($tagVersions[$itemTag]) || $tagVersions[$itemTag] !== $itemTagVersion) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
