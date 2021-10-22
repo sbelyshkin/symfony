@@ -44,7 +44,6 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
     public function __construct(CacheItemPoolInterface $itemPool, CacheItemPoolInterface $tagPool = null)
     {
         parent::__construct($itemPool, $tagPool);
-        $this->setCallbackWrapper(null);
 
         $getPrefixedKeyMethod = \Closure::fromCallable([$this, 'getPrefixedKey']);
         $this->computeAndPackItems = \Closure::bind(

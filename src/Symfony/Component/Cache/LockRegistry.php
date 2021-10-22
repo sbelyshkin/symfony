@@ -127,7 +127,7 @@ final class LockRegistry
                         $save = false;
                     }
 
-                    return $value;
+                    return $item->get();
                 }
 
                 // if we failed the race, retry locking in blocking mode to wait for the winner
