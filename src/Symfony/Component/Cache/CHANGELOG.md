@@ -8,7 +8,7 @@ CHANGELOG
  * Deprecate `DoctrineProvider` and `DoctrineAdapter` because these classes have been added to the `doctrine/cache` package
  * Add `DoctrineDbalAdapter` identical to `PdoAdapter` for `Doctrine\DBAL\Connection` or DBAL URL
  * Deprecate usage of `PdoAdapter` with `Doctrine\DBAL\Connection` or DBAL URL
- * Added new family of Ephemeral Tag Aware Adapters which truly support volatile storages
+ * Improve TagAwareAdapter, add it to a new family of Tag Aware Adapters
 
 5.3
 ---

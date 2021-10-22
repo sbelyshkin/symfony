@@ -40,10 +40,7 @@ class TagAwareAdapterTest extends AdapterTestCase
         (new Filesystem())->remove(sys_get_temp_dir().'/symfony-cache');
     }
 
-    /**
-     * Test feature specific to TagAwareAdapter as it implicit needs to save deferred when also saving expiry info.
-     */
-    public function testInvalidateCommitsSeperatePools()
+    public function testInvalidateCommitsSeparatePools()
     {
         $pool1 = $this->createCachePool();
 
@@ -52,6 +49,7 @@ class TagAwareAdapterTest extends AdapterTestCase
 
         $pool1->saveDeferred($foo->set('foo'));
         $pool1->invalidateTags(['tag']);
+        $pool1->commit();
 
         $pool2 = $this->createCachePool();
         $foo = $pool2->getItem('foo');
@@ -83,10 +81,11 @@ class TagAwareAdapterTest extends AdapterTestCase
         $item->expiresAfter(100);
 
         $tag = $this->createMock(CacheItemInterface::class);
+        $tag->expects(self::exactly(2))->method('isHit')->willReturn(true);
         $tag->expects(self::exactly(2))->method('get')->willReturn(10);
 
         $tagsPool->expects(self::exactly(2))->method('getItems')->willReturn([
-            'baz'.TagAwareAdapter::TAGS_PREFIX => $tag,
+            TagAwareAdapter::TAG_PREFIX.'baz' => $tag,
         ]);
 
         $pool->save($item);
@@ -100,67 +99,6 @@ class TagAwareAdapterTest extends AdapterTestCase
         sleep(5);
 
         $this->assertTrue($pool->getItem('foo')->isHit());
-    }
-
-    public function testTagEntryIsCreatedForItemWithoutTags()
-    {
-        $pool = $this->createCachePool();
-
-        $itemKey = 'foo';
-        $item = $pool->getItem($itemKey);
-        $pool->save($item);
-
-        $adapter = new FilesystemAdapter();
-        $this->assertTrue($adapter->hasItem(TagAwareAdapter::TAGS_PREFIX.$itemKey));
-    }
-
-    public function testHasItemReturnsFalseWhenPoolDoesNotHaveItemTags()
-    {
-        $pool = $this->createCachePool();
-
-        $itemKey = 'foo';
-        $item = $pool->getItem($itemKey);
-        $pool->save($item);
-
-        $anotherPool = $this->createCachePool();
-
-        $adapter = new FilesystemAdapter();
-        $adapter->deleteItem(TagAwareAdapter::TAGS_PREFIX.$itemKey); //simulate item losing tags pair
-
-        $this->assertFalse($anotherPool->hasItem($itemKey));
-    }
-
-    public function testGetItemReturnsCacheMissWhenPoolDoesNotHaveItemTags()
-    {
-        $pool = $this->createCachePool();
-
-        $itemKey = 'foo';
-        $item = $pool->getItem($itemKey);
-        $pool->save($item);
-
-        $anotherPool = $this->createCachePool();
-
-        $adapter = new FilesystemAdapter();
-        $adapter->deleteItem(TagAwareAdapter::TAGS_PREFIX.$itemKey); //simulate item losing tags pair
-
-        $item = $anotherPool->getItem($itemKey);
-        $this->assertFalse($item->isHit());
-    }
-
-    public function testHasItemReturnsFalseWhenPoolDoesNotHaveItemAndOnlyHasTags()
-    {
-        $pool = $this->createCachePool();
-
-        $itemKey = 'foo';
-        $item = $pool->getItem($itemKey);
-        $pool->save($item);
-
-        $anotherPool = $this->createCachePool();
-
-        $adapter = new FilesystemAdapter();
-        $adapter->deleteItem($itemKey); //simulate losing item but keeping tags
-
-        $this->assertFalse($anotherPool->hasItem($itemKey));
     }
 
     public function testInvalidateTagsWithArrayAdapter()
@@ -180,23 +118,6 @@ class TagAwareAdapterTest extends AdapterTestCase
         $adapter->invalidateTags(['bar']);
 
         $this->assertFalse($adapter->getItem('foo')->isHit());
-    }
-
-    public function testGetItemReturnsCacheMissWhenPoolDoesNotHaveItemAndOnlyHasTags()
-    {
-        $pool = $this->createCachePool();
-
-        $itemKey = 'foo';
-        $item = $pool->getItem($itemKey);
-        $pool->save($item);
-
-        $anotherPool = $this->createCachePool();
-
-        $adapter = new FilesystemAdapter();
-        $adapter->deleteItem($itemKey); //simulate losing item but keeping tags
-
-        $item = $anotherPool->getItem($itemKey);
-        $this->assertFalse($item->isHit());
     }
 
     public function testLog()
