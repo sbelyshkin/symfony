@@ -196,6 +196,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             $this->commit();
         }
 
+        $allTagsHaveSingleVersion = true;
         foreach ($this->pool->getItems(array_keys($itemIdsMap)) as $itemId => $item) {
             $key = $itemIdsMap[$itemId];
             if (!$item->isHit()) {
@@ -217,12 +218,22 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
             }
 
             $tagVersions += $itemData['tagVersions'];
+
+            if ($allTagsHaveSingleVersion) {
+                foreach ($itemData['tagVersions'] as $tag => $tagVersion) {
+                    if ($tagVersions[$tag] !== $tagVersion) {
+                        $allTagsHaveSingleVersion = false;
+                        break;
+                    }
+                }
+            }
+
             $items[$key] = $itemData;
         }
 
         $itemIdsMap = null;
 
-        $tagVersions = $this->getTagVersions(array_keys($tagVersions));
+        $tagVersions = $this->getTagVersions(array_keys($tagVersions), !$allTagsHaveSingleVersion);
 
         foreach ($items as $key => $itemData) {
             if (null === $itemData) {
@@ -405,7 +416,7 @@ abstract class AbstractEphemeralTagAwareAdapter implements TagAwareAdapterInterf
      *
      * @return string[] Tag versions indexed by tag keys
      */
-    protected function getTagVersions(array $tags): array
+    protected function getTagVersions(array $tags, bool $forceTagRetrieving = false): array
     {
         if (!$tags) {
             return [];

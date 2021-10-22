@@ -234,23 +234,24 @@ class EphemeralTagAwareAdapter extends AbstractEphemeralTagAwareAdapter
      *
      * @return string[]
      */
-    protected function getTagVersions(array $tags): array
+    protected function getTagVersions(array $tags, bool $forceTagRetrieving = false): array
     {
         if (!$tags) {
             return [];
         }
 
-        if ($this->lastRetrievedTagVersions) {
-            $tagVersions = array_intersect_key($this->lastRetrievedTagVersions, array_flip($tags));
+        $tags = array_flip($tags);
+        if ($this->lastRetrievedTagVersions && !$forceTagRetrieving) {
+            $tagVersions = array_intersect_key($this->lastRetrievedTagVersions, $tags);
             if (\count($tagVersions) === \count($tags)) {
                 // All requested tags are in the last retrieved set
                 return $tagVersions;
             }
         }
 
-        $this->lastRetrievedTagVersions = $this->retrieveTagVersions($tags);
+        $this->lastRetrievedTagVersions = $this->retrieveTagVersions(array_keys($this->lastRetrievedTagVersions += $tags));
 
-        return $this->lastRetrievedTagVersions;
+        return array_intersect_key($this->lastRetrievedTagVersions, $tags);
     }
 
     /**
