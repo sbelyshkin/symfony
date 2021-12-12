@@ -4,8 +4,10 @@ namespace Symfony\Component\Cache\Tests\Adapter;
 
 use PHPUnit\Framework\TestCase;
 use Psr\Cache\CacheItemPoolInterface;
+use Symfony\Component\Cache\Adapter\AbstractAdapter;
 use Symfony\Component\Cache\Adapter\ArrayAdapter;
 use Symfony\Component\Cache\Adapter\ProxyAdapter;
+use Symfony\Component\Cache\Adapter\RedisAdapter;
 use Symfony\Component\Cache\Adapter\TagAwareAdapter;
 use Symfony\Component\Cache\Tests\Fixtures\ExternalAdapter;
 
@@ -30,10 +32,13 @@ class TagAwareAndProxyAdapterIntegrationTest extends TestCase
         $this->assertFalse($cache->getItem('foo')->isHit());
     }
 
-    public function testIntegrationUsingProxiedAdapterForTagsPool()
+    /**
+     * @dataProvider dataProvider
+     */
+    public function testIntegrationUsingProxiedAdapterForTagsPool(CacheItemPoolInterface $proxiedAdapter)
     {
         $arrayAdapter = new ArrayAdapter();
-        $cache = new TagAwareAdapter($arrayAdapter, new ProxyAdapter($arrayAdapter));
+        $cache = new TagAwareAdapter($arrayAdapter, new ProxyAdapter($proxiedAdapter), 0.0);
 
         $item = $cache->getItem('foo');
         $item->expiresAfter(600);
@@ -47,11 +52,15 @@ class TagAwareAndProxyAdapterIntegrationTest extends TestCase
         $cache->invalidateTags(['baz']);
 
         $this->assertFalse($cache->getItem('foo')->isHit());
+
+        $cache->clear();
+        $proxiedAdapter->clear();
     }
 
     public function dataProvider(): array
     {
         return [
+            [new RedisAdapter(AbstractAdapter::createConnection('redis://'.getenv('REDIS_HOST'), ['lazy' => true]), str_replace('\\', '.', __CLASS__))],
             [new ArrayAdapter()],
             // also testing with a non-AdapterInterface implementation
             // because the ProxyAdapter behaves slightly different for those
